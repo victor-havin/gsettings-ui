@@ -27,12 +27,13 @@
     ```
 3. Install system dependencies (if needed):
     ```bash
-    sudo apt install python3-gi
+    sudo apt install python3-gi python3-tk
     ```
     Note that this program is accessing Gnome system configuration, so 
-    it relys on system packages that must be installed with apt as shown
+    it relies on system packages that must be installed with apt as shown
     above. Make sure you have Python gi and tkinter installed before 
-    running this program.
+    running this program. Look up gi and tk installation instruction 
+    specific to your system if it is not Ubuntu.
     
 ## Usage
 
