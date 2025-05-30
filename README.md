@@ -25,17 +25,15 @@
     ```bash
     cd gsettings-ui
     ```
-
-3. Install Python dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4. Install system dependencies (if needed):
+3. Install system dependencies (if needed):
     ```bash
     sudo apt install python3-gi
     ```
-
+    Note that this program is accessing Gnome system configuration, so 
+    it relys on system packages that must be installed with apt as shown
+    above. Make sure you have Python gi and tkinter installed before 
+    running this program.
+    
 ## Usage
 
 ```bash
