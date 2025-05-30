@@ -39,7 +39,7 @@
 ## Usage
 
 ```bash
-python3 proto_ui.py
+python3 gsettings_ui.py
 ```
 
 ---
