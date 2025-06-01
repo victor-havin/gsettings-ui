@@ -141,7 +141,6 @@ class GSettingsViewer(tk.Tk):
         ELEMENT = 4
 
     """ Special functions """
-        
     ## Class constructor
     ## Initializes the main window, sets up the layout, and loads GSettings schemas.    
     def __init__(self):
@@ -155,6 +154,7 @@ class GSettingsViewer(tk.Tk):
         self.after_id = 0  # ID for the after method
         # Gi data dictionary
         self.gi_dict : dict = {}
+        # Node type dictionary
         # Do UI layout
         self.do_layout()        
         # Load schemas
@@ -250,6 +250,12 @@ class GSettingsViewer(tk.Tk):
             self.ico_schema = tk.PhotoImage(width=16, height=16)
             self.ico_key = tk.PhotoImage(width=16, height=16)
             self.ico_value = tk.PhotoImage(width=16, height=16)
+        self.icons_dict = {
+            self.NodeType.SCHEMA:   self.ico_schema,
+            self.NodeType.KEY:      self.ico_key,
+            self.NodeType.ELEMENT:  self.ico_value,
+            self.NodeType.VALUE:    self.ico_value
+        }
         # Set the icons for the treeview
         self.tree.tag_configure("schema", image=self.ico_schema)
         self.tree.tag_configure("key", image=self.ico_key)
@@ -374,27 +380,27 @@ class GSettingsViewer(tk.Tk):
         if val:
             # Handle different types of values
             # If the value is set, unpack it and insert into the tree
-            current = self.insert(parent, key, val.unpack(), self.NodeType.KEY, self.ico_key)
+            current = self.insert(parent, key, val.unpack(), self.NodeType.KEY)
             type_str = val.get_type_string()
             if type_str.startswith('as') or type_str.startswith('a('):
                 # Array types: show key, children as values
                 for i, v in enumerate(val.unpack()):
-                    next = self.insert(current, f"{i}", v, self.NodeType.ELEMENT, self.ico_value)
+                    next = self.insert(current, f"{i}", v, self.NodeType.ELEMENT)
                     self.gi_dict[next] = gi_data
             elif type_str.startswith('a{') or type_str.startswith('a@'):
                 # Dict types: show key, children as key-value pairs
                 for k, v in val.unpack().items():
-                    next = self.insert(current, k, v, self.NodeType.ELEMENT, self.ico_value)
+                    next = self.insert(current, k, v, self.NodeType.ELEMENT)
                     self.gi_dict[next] = gi_data
             elif type_str.startswith('aa{'):
                 # Array of dicts: show key, children as dicts
                 for d in val.unpack():
                     for k, v in d.items():
-                        next = self.insert(current, k, v, self.NodeType.ELEMENT, self.ico_value)
+                        next = self.insert(current, k, v, self.NodeType.ELEMENT)
                         self.gi_dict[next] = gi_data
         else:
             # If the value is not set, just insert the key
-            current = self.insert(parent, key, "", self.NodeType.KEY, self.ico_key)
+            current = self.insert(parent, key, "", self.NodeType.KEY)
             self.gi_dict[current] = gi_data
         # Add the GiData object to the tree item
         self.gi_dict[current] = gi_data
@@ -555,9 +561,10 @@ class GSettingsViewer(tk.Tk):
     ## Insert
     ## This function inserts a new item into the treeview with the given key, value, type, and image.
     ## It returns the ID of the newly inserted item.
-    def insert(self, parent, key, val, type, image):
+    def insert(self, parent, key, val, type):
         values = (str(val),)
         tags = ("type", type)
+        image = self.icons_dict[type]
         return self.tree.insert(parent, "end", text=key, values=values, tags=tags, image=image)
 
     ## Update text pane
@@ -622,8 +629,8 @@ class GSettingsViewer(tk.Tk):
 """ Main function """
 ## This function creates an instance of the GSettingsViewer class and starts the Tkinter main loop.
 if __name__ == "__main__":
-    try:
+#    try:
         app = GSettingsViewer()
         app.mainloop()
-    except Exception as e:
-        print(f"An error occurred: {e}")
+#    except Exception as e:
+#        print(f"An error occurred: {e}")
