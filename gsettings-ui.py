@@ -23,6 +23,7 @@ python3 gsettings-ui.py
 """
 
 """ Import section """
+from os import path
 from enum import Enum
 # GIO_VERSION = "2.0"
 import gi
@@ -144,14 +145,11 @@ class GSettingsViewer(tk.Tk):
     ## Class constructor
     ## Initializes the main window, sets up the layout, and loads GSettings schemas.    
     def __init__(self):
+        super().__init__()
         # Constants
         self.MAX_ASCII : int = 256          # Max ASCII key code
         self. SEARCH_DELAY :int = 300       # At least SEARCH_DELAY between searches
-        super().__init__()
-        self.title("GNOME GSettings Viewer")
-        self.wm_title = "gsettings_ui"
-        self.geometry("600x480")
-        self.resizable(True, True)
+        self.mydir = path.dirname(__file__)
         # Search results
         self.search_results : SearchResults = SearchResults()
         self.after_id = 0  # ID for the after method
@@ -169,6 +167,11 @@ class GSettingsViewer(tk.Tk):
     ## text pane, and status bar.
     ## It also binds events for resizing the toolbar and handling selections in the treeview.
     def do_layout(self):
+        # Set main window props
+        self.title("GNOME GSettings Viewer")
+        self.wm_title = "gsettings_ui"
+        self.geometry("600x480")
+        self.resizable(True, True)
          # Toolbar for actions
         self.toolbar = ttk.Frame(self, height=30)  # Fixed height for the toolbar
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
@@ -186,11 +189,11 @@ class GSettingsViewer(tk.Tk):
         self.path_text.bind("<Return>", lambda event: self.load_schemas(self.path_text.get()))
         #toolbar icons
         try:
-            self.ico_folder = tk.PhotoImage(file="icons/ico_folder.png")
-            self.ico_check  = tk.PhotoImage(file="icons/ico_check.png")
-            self.ico_glass = tk.PhotoImage(file="icons/ico_glass.png")
-            self.ico_up = tk.PhotoImage(width=16, file="icons/ico_up.png")
-            self.ico_down = tk.PhotoImage(width=16, file="icons/ico_down.png")
+            self.ico_folder = tk.PhotoImage(file=f"{self.mydir}/icons/ico_folder.png")
+            self.ico_check  = tk.PhotoImage(file=f"{self.mydir}/icons/ico_check.png")
+            self.ico_glass = tk.PhotoImage(file=f"{self.mydir}/icons/ico_glass.png")
+            self.ico_up = tk.PhotoImage(file=f"{self.mydir}/icons/ico_up.png")
+            self.ico_down = tk.PhotoImage(file=f"{self.mydir}/icons/ico_down.png")
         except tk.TclError:
             # Fallback icons if the specified icons are not found
             self.ico_folder = tk.PhotoImage(width=16, height=16)
@@ -239,9 +242,9 @@ class GSettingsViewer(tk.Tk):
         self.tree.pack(fill=tk.BOTH, padx=1, pady=5, expand=True)
         # TreeView icons
         try:
-            self.ico_schema = tk.PhotoImage(file="icons/ico_schema.png")
-            self.ico_key = tk.PhotoImage(file="icons/ico_key.png")
-            self.ico_value = tk.PhotoImage(file="icons/ico_value.png")
+            self.ico_schema = tk.PhotoImage(file=f"{self.mydir}/icons/ico_schema.png")
+            self.ico_key = tk.PhotoImage(file=f"{self.mydir}/icons/ico_key.png")
+            self.ico_value = tk.PhotoImage(file=f"{self.mydir}/icons/ico_value.png")
         except tk.TclError:
             # Fallback icons if the specified icons are not found
             self.ico_schema = tk.PhotoImage(width=16, height=16)
