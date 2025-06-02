@@ -51,6 +51,7 @@ class GiData:
         self.description = None     # Description of the schema key
         self.default_value = None   # Default value of the schema key
         self.value = None           # Current value of the schema key
+    
     ## String representation methods
     def __repr__(self):
         return f"GiData(schema_id={self.schema_id}, key={self.key})"
@@ -60,6 +61,29 @@ class GiData:
         if isinstance(other, GiData):
             return self.schema_id == other.schema_id and self.key == other.key
         return False
+    
+    @classmethod
+    def factory(cls, schema, key):
+        gi_data = GiData(schema.get_id(), key)
+        # Check if the value is set
+        schema_key = schema.get_key(key)
+        if schema_key:
+            # process the schema key
+            # Get metadata like description, default value, constraints, etc.
+            description = schema_key.get_description()
+            default_value = schema_key.get_default_value()
+            range = schema_key.get_range()
+            summary = schema_key.get_summary()
+            if description:
+                gi_data.set_description(description) 
+            if default_value:
+                gi_data.set_default_value(default_value)
+            if range:
+                gi_data.set_range(range)
+            if summary:
+                gi_data.set_summary(summary)
+            return gi_data
+        
     def set_schema_id(self, schema_id):
         #Set the schema ID of the data.
         self.schema_id = schema_id
@@ -350,7 +374,10 @@ class GSettingsViewer(tk.Tk):
                         continue
                     for key in schema.list_keys():
                         val = settings.get_value(key)
-                        self.insert_tree(parent, key, val, schema)        
+                        gi_data = GiData.factory(schema, key)
+                        data = val.unpack()
+                        current = self.insert_tree(parent, key, key, data, schema)        
+                        self.gi_dict[current] = gi_data
         except Exception as e:
             self.status_bar.config(text=f"Error loading schemas: {e}")
 
@@ -358,52 +385,32 @@ class GSettingsViewer(tk.Tk):
     ## This function inserts the schema details into the treeview.
     ## It handles different types of values (lists, dictionaries, etc.) and unpacks them accordingly.
     ## ToDo: Make it recursive?
-    def insert_tree(self, parent, key, val, schema):
-        gi_data = GiData(schema.get_id(), key)
-        # Check if the value is set
-        schema_key = schema.get_key(key)
-        if schema_key:
-            # process the schema key
-            # Get metadata like description, default value, constraints, etc.
-            description = schema_key.get_description()
-            default_value = schema_key.get_default_value()
-            range = schema_key.get_range()
-            summary = schema_key.get_summary()
-            if description:
-                gi_data.set_description(description) 
-            if default_value:
-                gi_data.set_default_value(default_value)
-            if range:
-                gi_data.set_range(range)
-            if summary:
-                gi_data.set_summary(summary)
-        if val:
+    def insert_tree(self, parent, key, name, data, schema):
+        if data:
             # Handle different types of values
             # If the value is set, unpack it and insert into the tree
-            current = self.insert(parent, key, val.unpack(), self.NodeType.KEY)
-            type_str = val.get_type_string()
-            if type_str.startswith('as') or type_str.startswith('a('):
-                # Array types: show key, children as values
-                for i, v in enumerate(val.unpack()):
-                    next = self.insert(current, f"{i}", v, self.NodeType.ELEMENT)
-                    self.gi_dict[next] = gi_data
-            elif type_str.startswith('a{') or type_str.startswith('a@'):
+            t = type(data)
+            t_str = str(t).split("'")[1]
+            if t in [int, float, bool, str]:
+                current = self.insert(parent, name, data, self.NodeType.KEY)
+            else:
+                current = self.insert(parent, name, f"<<{t_str}>>", self.NodeType.KEY)
+            if isinstance(data, list):
+                # List types: show key, children as values
+                for i, d in enumerate(data):
+                    self.insert_tree(current, key, str(i), d, schema)
+            elif isinstance(data, tuple):
+                # Tuple of dicts: show key, children as dicts
+                for i,d in enumerate(data):
+                    self.insert_tree(current, key, str(i), d, schema)
+            elif isinstance(data, dict):
                 # Dict types: show key, children as key-value pairs
-                for k, v in val.unpack().items():
-                    next = self.insert(current, k, v, self.NodeType.ELEMENT)
-                    self.gi_dict[next] = gi_data
-            elif type_str.startswith('aa{'):
-                # Array of dicts: show key, children as dicts
-                for d in val.unpack():
-                    for k, v in d.items():
-                        next = self.insert(current, k, v, self.NodeType.ELEMENT)
-                        self.gi_dict[next] = gi_data
+                for d in data:
+                    self.insert_tree(current, key, d, data[d], schema)
         else:
             # If the value is not set, just insert the key
             current = self.insert(parent, key, "", self.NodeType.KEY)
-            self.gi_dict[current] = gi_data
-        # Add the GiData object to the tree item
-        self.gi_dict[current] = gi_data
+        return current
 
     """ Event handlers"""
     ## Redo toolbar layout
