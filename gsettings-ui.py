@@ -1,6 +1,5 @@
 """
 gsettings-ui
-
 A simple GUI application for exploring GNOME settings schemas.
 
 This tool displays GNOME settings in a structured tree of schemas and keys, 
@@ -17,110 +16,38 @@ Implemented in Python 3.
 - Uses `tkinter` (included with Python 3).
 - Uses `gi` (installable via `pip` or `apt-get`).
 
+On externally managed systems install dependencies with apt:
+```bash
+sudo apt install python3-tkinter python3-gi
+
 To start the application:
 ```bash
 python3 gsettings-ui.py
 """
 
 """ Import section """
+# import from Python
 from os import path
 from enum import Enum
+
 # GIO_VERSION = "2.0"
 import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
+
 # tkinter
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
 import tkinter.font as tkFont
 
-""" Implementation starts here """
+# gimodel from gisettings-ui project
+import gimodel
+from gimodel import GiSchema
+from gimodel import GiKey
+from gimodel import GiValue
 
-class GiData:
-    """
-    A class to hold data from Gio.
-    It can be used to store schema information, keys, and values.
-    """
-    def __init__(self, schema_id, key):
-        # Constructor for GiData
-        self.schema_id = schema_id  # The ID of the GSettings schema
-        self.key = key              # The key in the schema
-        self.summary = None         # Summary of the schema key (if applicable)
-        self.range = None           # Range of values for the schema key (if applicable)
-        self.description = None     # Description of the schema key
-        self.default_value = None   # Default value of the schema key
-        self.value = None           # Current value of the schema key
-    
-    ## String representation methods
-    def __repr__(self):
-        return f"GiData(schema_id={self.schema_id}, key={self.key})"
-    def __str__(self):
-        return f"{self.schema_id}.{self.key}"
-    def __eq__(self, other):
-        if isinstance(other, GiData):
-            return self.schema_id == other.schema_id and self.key == other.key
-        return False
-    
-    @classmethod
-    def factory(cls, schema, key):
-        gi_data = GiData(schema.get_id(), key)
-        # Check if the value is set
-        schema_key = schema.get_key(key)
-        if schema_key:
-            # process the schema key
-            # Get metadata like description, default value, constraints, etc.
-            description = schema_key.get_description()
-            default_value = schema_key.get_default_value()
-            range = schema_key.get_range()
-            summary = schema_key.get_summary()
-            if description:
-                gi_data.set_description(description) 
-            if default_value:
-                gi_data.set_default_value(default_value)
-            if range:
-                gi_data.set_range(range)
-            if summary:
-                gi_data.set_summary(summary)
-            return gi_data
-        
-    def set_schema_id(self, schema_id):
-        #Set the schema ID of the data.
-        self.schema_id = schema_id
-    def get_schema_id(self):
-        #Get the schema ID of the data.
-        return self.schema_id 
-    def set_summary(self, summary):
-        #Set the summary of the schema key.
-        self.summary = summary  
-    def get_summary(self):
-        #Get the summary of the schema key.
-        return self.summary 
-    def set_range(self, range):
-        #Set the range of the schema key.
-        self.range = range  
-    def get_range(self):
-        #Get the range of the schema key.
-        return self.range
-    def set_key(self, key):
-        #Set the key of the schema.
-        self.key = key
-    def get_key(self):
-        #Get the key of the schema.
-        return self.key
-    def set_description(self, description):
-        #Set the description of the schema key.
-        self.description = description
-    def get_description(self):
-        #Get the description of the schema key.
-        return self.description
-    def set_default_value(self, default_value):
-        #Set the default value of the schema key.
-        self.default_value = default_value
-    def get_default_value(self):
-        #Get the default value of the schema key.
-        return self.default_value
-       
+""" Implementation starts here """
 class SearchResults(list):
     """
     A class to hold search results.
@@ -196,6 +123,7 @@ class GSettingsViewer(tk.Tk):
         self.wm_title = "gsettings_ui"
         self.geometry("600x480")
         self.resizable(True, True)
+        self.ico_empty = tk.PhotoImage(width=16,height=16)
          # Toolbar for actions
         self.toolbar = ttk.Frame(self, height=30)  # Fixed height for the toolbar
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
@@ -220,11 +148,11 @@ class GSettingsViewer(tk.Tk):
             self.ico_down = tk.PhotoImage(file=f"{self.mydir}/icons/ico_down.png")
         except tk.TclError:
             # Fallback icons if the specified icons are not found
-            self.ico_folder = tk.PhotoImage(width=16, height=16)
-            self.ico_check = tk.PhotoImage(width=16, height=16)
-            self.ico_glass = tk.PhotoImage(width=16, height=16)
-            self.ico_up = tk.PhotoImage(width=16, height=16)
-            self.ico_down = tk.PhotoImage(width=16, height=16)
+            self.ico_folder = self.ico_empty
+            self.ico_check =  self.ico_empty
+            self.ico_glass =  self.ico_empty
+            self.ico_up =  self.ico_empty
+            self.ico_down =  self.ico_empty
         # Add Browse buttton to the toolbar
         self.browse_button = tk.Button(self.toolbar, image=self.ico_folder, command=self.open_location)
         self.browse_button.pack(side=tk.LEFT, padx=5, pady=5)
@@ -268,17 +196,19 @@ class GSettingsViewer(tk.Tk):
         try:
             self.ico_schema = tk.PhotoImage(file=f"{self.mydir}/icons/ico_schema.png")
             self.ico_key = tk.PhotoImage(file=f"{self.mydir}/icons/ico_key.png")
-            self.ico_value = tk.PhotoImage(file=f"{self.mydir}/icons/ico_value.png")
+            self.ico_value = tk.PhotoImage(file=f"{self.mydir}/icons/ico_check.png")
+            self.ico_data = tk.PhotoImage(file=f"{self.mydir}/icons/ico_value.png")
         except tk.TclError:
             # Fallback icons if the specified icons are not found
-            self.ico_schema = tk.PhotoImage(width=16, height=16)
-            self.ico_key = tk.PhotoImage(width=16, height=16)
-            self.ico_value = tk.PhotoImage(width=16, height=16)
+            self.ico_schema =  self.ico_empty
+            self.ico_key =  self.ico_empty
+            self.ico_value =  self.ico_empty
+            self.ico_data =  self.ico_empty
         self.icons_dict = {
             self.NodeType.SCHEMA:   self.ico_schema,
             self.NodeType.KEY:      self.ico_key,
-            self.NodeType.ELEMENT:  self.ico_value,
-            self.NodeType.VALUE:    self.ico_value
+            self.NodeType.ELEMENT:  self.ico_folder,   #ToDo: compound key
+            self.NodeType.VALUE:    self.ico_data
         }
         # Set the icons for the treeview
         self.tree.tag_configure("schema", image=self.ico_schema)
@@ -287,7 +217,7 @@ class GSettingsViewer(tk.Tk):
         # Text frame for schema details
         self.text_frame = ttk.Frame(self.paned_window)
         self.text_frame.pack(fill=tk.BOTH, expand=True)
-        # Add a label to the text frame
+
         # Text pane for schema details
         self.text = tk.Text(self.text_frame, wrap="word", height=10, width=40)
         # Add tags for text formatting
@@ -302,9 +232,6 @@ class GSettingsViewer(tk.Tk):
         self.text.pack(fill=tk.BOTH, expand=True)
         # Bind copy and paste actions to the text pane
         self.text.bind("<Control-c>", self.copy_text)
-        # Add status bar to the main window
-        #self.status_frame = ttk.Frame(self, height=20)  # Fixed height for the status bar
-        #self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Add views to the paned window
         self.paned_window.add(self.tree_frame, weight=1)
@@ -338,6 +265,7 @@ class GSettingsViewer(tk.Tk):
             if not schemas:
                 self.status_bar.config(text="No schemas found.")
                 return
+
             # Validate the location
             # ToDo: 
             # 1. More rigorous validation
@@ -348,6 +276,7 @@ class GSettingsViewer(tk.Tk):
                 if not Gio.File.new_for_path(location).query_exists(None):
                     self.status_bar.config(text=f"Path {location} does not exist.")
                     return
+
             # Insert schemas into the treeview
             for schema_id in schemas:
                 schema = self.schema_source.lookup(schema_id, False)
@@ -358,7 +287,8 @@ class GSettingsViewer(tk.Tk):
                 for i, part in enumerate(split_id):
                     node_id = ".".join(split_id[:i+1])
                     if not self.tree.exists(node_id):
-                        self.tree.insert(parent, "end", node_id, text=part, values=(), tags=("type", self.NodeType.SCHEMA), image=self.ico_schema)
+                        node = self.tree.insert(parent, "end", node_id, text=part, values=(), tags=("type", self.NodeType.SCHEMA), image=self.ico_schema)
+                        self.gi_dict[node] = GiSchema.factory(node_id)
                     parent = node_id
                 # At this point parent is the full schema_id node
                 # Now parse the settings
@@ -374,42 +304,59 @@ class GSettingsViewer(tk.Tk):
                         continue
                     for key in schema.list_keys():
                         val = settings.get_value(key)
-                        gi_data = GiData.factory(schema, key)
                         data = val.unpack()
-                        current = self.insert_tree(parent, key, key, data, schema)        
-                        self.gi_dict[current] = gi_data
+                        self.insert_tree(parent, None, key, data, schema)
+                            
         except Exception as e:
             self.status_bar.config(text=f"Error loading schemas: {e}")
 
     ## Insert tree
     ## This function inserts the schema details into the treeview.
-    ## It handles different types of values (lists, dictionaries, etc.) and unpacks them accordingly.
-    ## ToDo: Make it recursive?
+    ## It handles different types of values (lists, dictionaries, etc.) and treats them accordingly.
+    ## Recursively unpacks data
     def insert_tree(self, parent, key, name, data, schema):
+        t = None
         if data:
-            # Handle different types of values
-            # If the value is set, unpack it and insert into the tree
             t = type(data)
             t_str = str(t).split("'")[1]
+            
+            # Insert new node into tree
             if t in [int, float, bool, str]:
-                current = self.insert(parent, name, data, self.NodeType.KEY)
+                if(key is None):
+                    current = self.insert(parent, name, data, self.NodeType.KEY)
+                else:
+                    current = self.insert(parent, name, data, self.NodeType.VALUE)
             else:
-                current = self.insert(parent, name, f"<<{t_str}>>", self.NodeType.KEY)
+                current = self.insert(parent, name, "", self.NodeType.ELEMENT)
+            
+            # Set the root key
+            root_key = current if key is None else key
+
+            # Handle different types of values
             if isinstance(data, list):
                 # List types: show key, children as values
                 for i, d in enumerate(data):
-                    self.insert_tree(current, key, str(i), d, schema)
+                    self.insert_tree(current, root_key, str(i), d, schema)
             elif isinstance(data, tuple):
                 # Tuple of dicts: show key, children as dicts
                 for i,d in enumerate(data):
-                    self.insert_tree(current, key, str(i), d, schema)
+                    self.insert_tree(current, root_key, str(i), d, schema)
             elif isinstance(data, dict):
                 # Dict types: show key, children as key-value pairs
                 for d in data:
-                    self.insert_tree(current, key, d, data[d], schema)
+                    self.insert_tree(current, root_key, d, data[d], schema)
         else:
             # If the value is not set, just insert the key
-            current = self.insert(parent, key, "", self.NodeType.KEY)
+            current = self.insert(parent, name, "", self.NodeType.KEY)
+
+        # If this is not the roort key, add data to the dictionarey
+        if key:
+            self.gi_dict[current] = GiValue.factory(key, data, t)
+        else:
+            self.gi_dict[current] = GiKey.factory(schema, name)
+            if data:
+                gi_key : GiKey = self.gi_dict[current]
+                gi_key.set_value(GiValue.factory(current, data, t))
         return current
 
     """ Event handlers"""
@@ -456,7 +403,6 @@ class GSettingsViewer(tk.Tk):
         # Update the text pane with details of the selected item
         self.update_text_pane(selected_item)
 
-
     ## Search handle
     def search_handle(self, event):
         # If the key is a special key, handle it separately
@@ -495,11 +441,14 @@ class GSettingsViewer(tk.Tk):
     ## This function performs a recursive search in the treeview for the given search text.
     def do_search(self, search_text, root):
         for item_id in self.tree.get_children(root):
-            text = self.tree.item(item_id, "text")            
-            if search_text.lower() in text.lower():
-                self.search_results.append(item_id)
-            else:
-                self.do_search(search_text, item_id)
+            if type(self.gi_dict[item_id]) in [GiSchema, GiKey]:
+                # For now only search schemas and keys
+                # ToDo: Search Data option?
+                text = self.tree.item(item_id, "text")            
+                if search_text.lower() in text.lower():
+                    self.search_results.append(item_id)
+                else:
+                    self.do_search(search_text, item_id)
                 
     ## Search previous result
     def search_prev(self):
@@ -570,13 +519,26 @@ class GSettingsViewer(tk.Tk):
     ## It returns the ID of the newly inserted item.
     def insert(self, parent, key, val, type):
         values = (str(val),)
-        tags = ("type", type)
-        image = self.icons_dict[type]
-        return self.tree.insert(parent, "end", text=key, values=values, tags=tags, image=image)
+        image = self.icons_dict.get(type, self.ico_empty)
+        return self.tree.insert(parent, "end", text=key, values=values, image=image)
 
     ## Update text pane
     ## This function updates the text pane with details of the selected item in the treeview.
     def update_text_pane(self, selected_item):
+        gi_schema = None
+        gi_key = None
+        gi_value = None
+        gi_data = self.gi_dict.get(selected_item, None)
+        if gi_data:
+            if isinstance(gi_data, GiSchema):
+                gi_schema = gi_data
+            elif isinstance(gi_data, GiKey):
+                gi_key = gi_data
+                gi_value = gi_key.get_value()
+            elif isinstance(gi_data, GiValue):
+                gi_value = gi_data
+                gi_key = self.gi_dict[gi_value.get_key()]
+                
         # Set up the text pane
         self.text.config(state=tk.NORMAL)
         self.text.delete(1.0, tk.END)
@@ -586,47 +548,42 @@ class GSettingsViewer(tk.Tk):
         # Show the description and value
         values = self.tree.item(selected_item, "values")
         text = self.tree.item(selected_item, "text")
-        tags = self.tree.item(selected_item, "tags")
-        gi_data = self.gi_dict.get(selected_item, None)
-        if gi_data:
+        
+        if gi_key:
             # If GiData is available, show its schema ID
             self.text.insert(tk.END, "Schema ID: ", "bold_blue")
-            self.text.insert(tk.END, f"{gi_data.get_schema_id()}\n", "regular")
+            self.text.insert(tk.END, f"{gi_key.get_schema_id()}\n", "regular")
             # If key is present, show it
-            if gi_data.get_key():
+            if gi_key.get_key():
                 self.text.insert(tk.END, "Key: ", "bold_blue")
-                self.text.insert(tk.END, f"{gi_data.get_key()}", "regular")
+                self.text.insert(tk.END, f"{gi_key.get_key()}", "regular")
                 # If summary is present, show it 
-                if gi_data.get_summary():
-                    self.text.insert(tk.END, f"\t({gi_data.get_summary()})\n", "regular")
+                if gi_key.get_summary():
+                    self.text.insert(tk.END, f"\t({gi_key.get_summary()})\n", "regular")
                 self.text.insert(tk.END, "\n")
             # If description is present, show it
-            if gi_data.get_description():
+            if gi_key.get_description():
                 self.text.insert(tk.END, "Description: ", "bold_blue")
-                self.text.insert(tk.END, f"\n{gi_data.get_description()}\n", "regular")
-        if values and len(values[0]):
-            if 'NodeType.ELEMENT' in tags:
-                # Show name for dictionary, list or array elements
-                self.text.insert(tk.END, "Name: ", "bold_blue")
-                self.text.insert(tk.END, f"\n{text}\n", "regular")
-            # Show the value
-            self.text.insert(tk.END, "Value: ", "bold_blue")
-            self.text.insert(tk.END, f"\n{values[0]}\n", "regular") 
-        if gi_data:
-            # If default value is present, show it
-            if gi_data.get_default_value(): 
-                self.text.insert(tk.END, "Default Value: ", "bold_blue")
-                default_value = gi_data.get_default_value().unpack()
-                # If the node is an element, show the default value for it
-                # otherwise show the default value for the key
-                if 'NodeType.ELEMENT' in tags:
-                    index = self.tree.get_children(self.tree.parent(selected_item)).index(selected_item)
-                    self.text.insert(tk.END, f"\n{default_value[index]}\n", "regular")
-                else:
-                    self.text.insert(tk.END, f"\n{default_value}\n", "regular")
+                self.text.insert(tk.END, f"\n{gi_key.get_description()}\n", "regular")
+        if gi_value:
+            # Show the value if present
+            self.text.insert(tk.END, f"Value:{gi_value.get_type()} ", "bold_blue")
+            self.text.insert(tk.END, f"\n{gi_value.get_value()}\n", "regular") 
+        if gi_key:
+            # If default value if present
+            default_value = gi_key.get_default_value()
+            if default_value:
+                if type(default_value) in [list, tuple]:
+                    # if default is compond and value is not - select the matchiing one
+                    if not gi_value.is_compound():
+                        parent = self.tree.parent(selected_item)
+                        index = self.tree.get_children(parent).index(selected_item)
+                        default_value = default_value[index]
+                self.text.insert(tk.END, f"Default Value: {type(default_value)} ", "bold_blue")
+                self.text.insert(tk.END, f"\n{default_value}\n", "regular")
             # If range is present, show it
-            if gi_data.get_range():
-                t,v = gi_data.get_range().unpack()
+            if gi_key.get_range():
+                t,v = gi_key.get_range().unpack()
                 if len(v) > 0:
                     self.text.insert(tk.END, "Range: ", "bold_blue")
                     self.text.insert(tk.END, f"\n{t} : {v}", "regular")
