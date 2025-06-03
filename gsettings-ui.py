@@ -319,7 +319,6 @@ class GSettingsViewer(tk.Tk):
         if data:
             t = type(data)
             t_str = str(t).split("'")[1]
-            
             # Insert new node into tree
             if t in [int, float, bool, str]:
                 if(key is None):
@@ -328,10 +327,8 @@ class GSettingsViewer(tk.Tk):
                     current = self.insert(parent, name, data, self.NodeType.VALUE)
             else:
                 current = self.insert(parent, name, "", self.NodeType.ELEMENT)
-            
             # Set the root key
             root_key = current if key is None else key
-
             # Handle different types of values
             if isinstance(data, list):
                 # List types: show key, children as values
@@ -345,6 +342,9 @@ class GSettingsViewer(tk.Tk):
                 # Dict types: show key, children as key-value pairs
                 for d in data:
                     self.insert_tree(current, root_key, d, data[d], schema)
+            else:
+                if not t in [int, float, bool, str]:
+                    print(f"-->Debug: Unknown type {t}")
         else:
             # If the value is not set, just insert the key
             current = self.insert(parent, name, "", self.NodeType.KEY)
@@ -593,8 +593,8 @@ class GSettingsViewer(tk.Tk):
 """ Main function """
 ## This function creates an instance of the GSettingsViewer class and starts the Tkinter main loop.
 if __name__ == "__main__":
-#    try:
+    try:
         app = GSettingsViewer()
         app.mainloop()
-#    except Exception as e:
-#        print(f"An error occurred: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
