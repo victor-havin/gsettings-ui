@@ -39,6 +39,7 @@ from gi.repository import Gio
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter import messagebox
 import tkinter.font as tkFont
 
 # gimodel from gisettings-ui project
@@ -46,6 +47,11 @@ import gimodel
 from gimodel import GiSchema
 from gimodel import GiKey
 from gimodel import GiValue
+from gimodel import GiDict
+from gimodel import GlVariant
+
+import gsedit
+from gsedit import GSettingsEditor
 
 """ Implementation starts here """
 class SearchResults(list):
@@ -89,7 +95,7 @@ class GSettingsViewer(tk.Tk):
         SCHEMA = 1
         KEY = 2
         VALUE = 3
-        ELEMENT = 4
+        COMPOUND = 4
 
     """ Special functions """
     ## Class constructor
@@ -104,13 +110,14 @@ class GSettingsViewer(tk.Tk):
         self.search_results : SearchResults = SearchResults()
         self.after_id = 0  # ID for the after method
         # Gi data dictionary
-        self.gi_dict : dict = {}
-        # Node type dictionary
+        self.gi_dict : GiDict = GiDict()
+        # Editor
+        self.gsedit = None
         # Do UI layout
         self.do_layout()        
         # Load schemas
         self.load_schemas()
-
+        
     """ UI Layout """
 
     ## Do layout
@@ -181,6 +188,7 @@ class GSettingsViewer(tk.Tk):
                 
         # Treeview frame
         self.tree_frame = ttk.Frame(self.paned_window)
+        self.tree_frame.bind("<Configure>", self.tree_frame_handle)
         self.tree_frame.pack(fill=tk.BOTH, expand=True)
         # Treeview for schemas
         self.tree = ttk.Treeview(self.tree_frame, columns=("Value", ), show="tree headings")
@@ -192,6 +200,8 @@ class GSettingsViewer(tk.Tk):
         self.tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y) 
         self.tree.configure(yscrollcommand=self.tree_scrollbar.set)
         self.tree.pack(fill=tk.BOTH, padx=1, pady=5, expand=True)
+        self.tree.bind("<Double-1>", self.edit_handle)
+        self.tree.bind("<KeyRelease>", self.edit_handle)
         # TreeView icons
         try:
             self.ico_schema = tk.PhotoImage(file=f"{self.mydir}/icons/ico_schema.png")
@@ -207,13 +217,9 @@ class GSettingsViewer(tk.Tk):
         self.icons_dict = {
             self.NodeType.SCHEMA:   self.ico_schema,
             self.NodeType.KEY:      self.ico_key,
-            self.NodeType.ELEMENT:  self.ico_folder,   #ToDo: compound key
+            self.NodeType.COMPOUND:  self.ico_folder,   #ToDo: compound key
             self.NodeType.VALUE:    self.ico_data
         }
-        # Set the icons for the treeview
-        self.tree.tag_configure("schema", image=self.ico_schema)
-        self.tree.tag_configure("key", image=self.ico_key)
-        self.tree.tag_configure("value", image=self.ico_value)
         # Text frame for schema details
         self.text_frame = ttk.Frame(self.paned_window)
         self.text_frame.pack(fill=tk.BOTH, expand=True)
@@ -247,7 +253,7 @@ class GSettingsViewer(tk.Tk):
     ## Load schemas
     ## This function loads the GSettings schemas from the system and populates the treeview with them.
     def load_schemas(self, location=None):
-        try:
+#         try:
             # Clear the treeview
             self.tree.delete(*self.tree.get_children())
             self.gi_dict.clear()  # Clear the GiData dictionary
@@ -305,60 +311,75 @@ class GSettingsViewer(tk.Tk):
                     for key in schema.list_keys():
                         val = settings.get_value(key)
                         data = val.unpack()
-                        self.insert_tree(parent, None, key, data, schema)
+                        self.insert_tree(parent, None, key, val, schema)
                             
-        except Exception as e:
-            self.status_bar.config(text=f"Error loading schemas: {e}")
+#        except Exception as e:
+#            self.status_bar.config(text=f"Error loading schemas: {e}")
 
-    ## Insert tree
-    ## This function inserts the schema details into the treeview.
-    ## It handles different types of values (lists, dictionaries, etc.) and treats them accordingly.
-    ## Recursively unpacks data
-    def insert_tree(self, parent, key, name, data, schema):
-        t = None
-        if data:
-            t = type(data)
-            t_str = str(t).split("'")[1]
+    def insert_tree(self, parent, key_id, name, data, schema):
+        # variant type
+        root_key = None
+        nullable = False
+        tv = data.get_type_string() if data != None else "?"
+        # Unpack variant
+        if data != None:
+            unpacked = data.unpack() if tv[0] in GlVariant.base_type_sig else None
             # Insert new node into tree
-            if t in [int, float, bool, str]:
-                if(key is None):
-                    current = self.insert(parent, name, data, self.NodeType.KEY)
+            if tv[0] in GlVariant.base_type_sig:
+                if(key_id is None):
+                    current = self.insert(parent, name, unpacked, self.NodeType.KEY)
                 else:
-                    current = self.insert(parent, name, data, self.NodeType.VALUE)
+                    current = self.insert(parent, name, unpacked, self.NodeType.VALUE)
             else:
-                current = self.insert(parent, name, "", self.NodeType.ELEMENT)
+                current = self.insert(parent, name, tv, self.NodeType.COMPOUND)
+                if(key_id is None):
+                    # save the root key
+                    self.gi_dict[current] = GiKey.factory(schema, name, current)
+                    root_key = current
+                    
             # Set the root key
-            root_key = current if key is None else key
+            root_key = current if key_id is None else key_id
             # Handle different types of values
-            if isinstance(data, list):
+            if tv[0] in "a([":
                 # List types: show key, children as values
-                for i, d in enumerate(data):
+                for i in range(data.n_children()):  # Iterate over array elements
+                    if tv.startswith("a{"):
+                        # dictionary
+                        d = data.get_child_value(i)
+                        k = d.get_child_value(0)
+                        v = d.get_child_value(1)
+                        self.insert_tree(current, root_key, k.unpack(), v, schema)
+                    else:          
+                        # list/array/tuple         
+                        d = data.get_child_value(i)
+                        self.insert_tree(current, root_key, str(i), d, schema)
+            elif tv[0] in "v@":
+                for i in range(data.n_children()):
+                    d = data.get_child_value(i)
                     self.insert_tree(current, root_key, str(i), d, schema)
-            elif isinstance(data, tuple):
-                # Tuple of dicts: show key, children as dicts
-                for i,d in enumerate(data):
+            elif tv[0] == "m":
+                nullable = True
+                for i in range(data.n_children()):
+                    d = data.get_child_value(i)
                     self.insert_tree(current, root_key, str(i), d, schema)
-            elif isinstance(data, dict):
-                # Dict types: show key, children as key-value pairs
-                for d in data:
-                    self.insert_tree(current, root_key, d, data[d], schema)
             else:
-                if not t in [int, float, bool, str]:
-                    print(f"-->Debug: Unknown type {t}")
+                if not tv[0] in GlVariant.base_type_sig:
+                    print(f"-->Debug: Unknown variant type {tv}")
         else:
             # If the value is not set, just insert the key
             current = self.insert(parent, name, "", self.NodeType.KEY)
 
         # If this is not the roort key, add data to the dictionarey
-        if key:
-            self.gi_dict[current] = GiValue.factory(key, data, t)
+        if key_id:
+            gi_key = self.gi_dict.get_key(root_key)
+            self.gi_dict[current] = GiValue.factory(gi_key, unpacked, tv)
         else:
-            self.gi_dict[current] = GiKey.factory(schema, name)
-            if data:
-                gi_key : GiKey = self.gi_dict[current]
-                gi_key.set_value(GiValue.factory(current, data, t))
+            gi_key = GiKey.factory(schema, name, current)
+            self.gi_dict[current] = gi_key
+            if data != None and not nullable:
+                gi_key.set_value(GiValue.factory(gi_key, unpacked, tv))
         return current
-
+ 
     """ Event handlers"""
     ## Redo toolbar layout
     ## This function is called when the toolbar is resized.
@@ -402,6 +423,22 @@ class GSettingsViewer(tk.Tk):
         self.tree.heading("#0", text=full_path, anchor="w")
         # Update the text pane with details of the selected item
         self.update_text_pane(selected_item)
+    #
+    def tree_frame_handle(self, event):
+        if self.gsedit:
+            self.gsedit.place()
+    
+    #
+    def edit_handle(self, event):
+        if event.type is tk.EventType.KeyRelease and event.keysym != 'Return':
+            return
+        selected_item = self.tree.focus()
+        children = self.tree.get_children(selected_item)
+        if(len(children) == 0):
+            #messagebox.showinfo("Warning", "Edit mode not yet implemented")
+            self.gsedit = GSettingsEditor(self)
+            self.gsedit.show()
+            self.gsedit = None
 
     ## Search handle
     def search_handle(self, event):
@@ -525,19 +562,12 @@ class GSettingsViewer(tk.Tk):
     ## Update text pane
     ## This function updates the text pane with details of the selected item in the treeview.
     def update_text_pane(self, selected_item):
-        gi_schema = None
-        gi_key = None
-        gi_value = None
-        gi_data = self.gi_dict.get(selected_item, None)
-        if gi_data:
-            if isinstance(gi_data, GiSchema):
-                gi_schema = gi_data
-            elif isinstance(gi_data, GiKey):
-                gi_key = gi_data
-                gi_value = gi_key.get_value()
-            elif isinstance(gi_data, GiValue):
-                gi_value = gi_data
-                gi_key = self.gi_dict[gi_value.get_key()]
+        gi_dict = self.gi_dict
+        gi_data = gi_dict.get_data(selected_item)
+        if isinstance(gi_data, GiSchema):
+            gi_key, gi_value = (None, None)
+        else:
+            gi_key, gi_value = self.gi_dict.get_keyvalue(selected_item)
                 
         # Set up the text pane
         self.text.config(state=tk.NORMAL)
@@ -552,23 +582,30 @@ class GSettingsViewer(tk.Tk):
         if gi_key:
             # If GiData is available, show its schema ID
             self.text.insert(tk.END, "Schema ID: ", "bold_blue")
-            self.text.insert(tk.END, f"{gi_key.get_schema_id()}\n", "regular")
+            self.text.insert(tk.END, f"{gi_key.get_schema_name()}\n")
             # If key is present, show it
-            if gi_key.get_key():
+            if gi_key.get_key_name():
                 self.text.insert(tk.END, "Key: ", "bold_blue")
-                self.text.insert(tk.END, f"{gi_key.get_key()}", "regular")
+                self.text.insert(tk.END, f"{gi_key.get_key_name()}")
                 # If summary is present, show it 
                 if gi_key.get_summary():
-                    self.text.insert(tk.END, f"\t({gi_key.get_summary()})\n", "regular")
+                    self.text.insert(tk.END, f"\t({gi_key.get_summary()})\n")
                 self.text.insert(tk.END, "\n")
+            #if key type present, show it
+            if gi_key.get_key_type():
+                self.text.insert(tk.END, "\nKey type:", "bold_blue")
+                self.text.insert(tk.END, f"{gi_key.get_key_type().dup_string()}\n")
             # If description is present, show it
             if gi_key.get_description():
                 self.text.insert(tk.END, "Description: ", "bold_blue")
-                self.text.insert(tk.END, f"\n{gi_key.get_description()}\n", "regular")
+                self.text.insert(tk.END, f"\n{gi_key.get_description()}\n")
         if gi_value:
             # Show the value if present
-            self.text.insert(tk.END, f"Value:{gi_value.get_type()} ", "bold_blue")
-            self.text.insert(tk.END, f"\n{gi_value.get_value()}\n", "regular") 
+            self.text.insert(tk.END, f"Value:{gi_value.get_vtype()} ", "bold_blue")
+            if gi_value.is_compound():
+                self.text.insert(tk.END, "\n<<Compound>>\n")
+            else:
+                self.text.insert(tk.END, f"\n{gi_value.get_value()}\n") 
         if gi_key:
             # If default value if present
             default_value = gi_key.get_default_value()
@@ -579,22 +616,22 @@ class GSettingsViewer(tk.Tk):
                         parent = self.tree.parent(selected_item)
                         index = self.tree.get_children(parent).index(selected_item)
                         default_value = default_value[index]
-                self.text.insert(tk.END, f"Default Value: {type(default_value)} ", "bold_blue")
-                self.text.insert(tk.END, f"\n{default_value}\n", "regular")
+                self.text.insert(tk.END, f"Default Value: ", "bold_blue")
+                self.text.insert(tk.END, f"\n{default_value}\n")
             # If range is present, show it
             if gi_key.get_range():
                 t,v = gi_key.get_range().unpack()
                 if len(v) > 0:
                     self.text.insert(tk.END, "Range: ", "bold_blue")
-                    self.text.insert(tk.END, f"\n{t} : {v}", "regular")
+                    self.text.insert(tk.END, f"\n{t} : {v}")
         # Lock the text pane
         self.text.config(state=tk.DISABLED)
  
 """ Main function """
 ## This function creates an instance of the GSettingsViewer class and starts the Tkinter main loop.
 if __name__ == "__main__":
-    try:
+#    try:
         app = GSettingsViewer()
         app.mainloop()
-    except Exception as e:
-        print(f"An error occurred: {e}")
+#    except Exception as e:
+#        print(f"An error occurred: {e}")
