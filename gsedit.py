@@ -14,11 +14,7 @@ from gi.repository import GLib
 
 # gimodel from gisettings-ui project
 import gimodel
-from gimodel import GiDict
-from gimodel import GiSchema
-from gimodel import GiKey
-from gimodel import GiValue
-from gimodel import GlVariant
+from gimodel import *
 
 class GSettingsEditor(tk.Toplevel):
 
@@ -28,9 +24,13 @@ class GSettingsEditor(tk.Toplevel):
         self.gi_key: GiKey = None
         self.parent = parent
         self.process_data(self.parent)
-        self.do_layout()        
-
-    def do_layout(self):
+        self.do_layout(self.parent)        
+        
+    def destroy(self):
+        self.after_cancel(self.place)
+        super().destroy()
+        
+    def do_layout(self, parent):
         # Setup window
         self.overrideredirect(True)
         self.title("GNOME GSettings Editor")
@@ -42,30 +42,38 @@ class GSettingsEditor(tk.Toplevel):
         
         self.info_frame = tk.Frame(self)
         self.label_info = tk.Label(self.info_frame, justify="left")
-        self.label_info.configure(text=f"Frame: {self.gi_key.get_schema_name()}\nKey: {self.gi_key.get_key_name()}")
+        self.label_info.configure(text=f"Schema: {self.gi_key.get_schema_name()}\nKey: {self.gi_key.get_key_name()}")
+        default_value = self.gi_key.get_default_value()
+        if default_value:
+            self.label_info.configure(text=self.label_info["text"] + f"\nDefault: {get_defaultvalue(parent.tree, default_value, self.gi_value)}")
         self.label_info.pack(side=tk.LEFT, fill=tk.X)
         self.info_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         self.edit_frame = tk.Frame(self)
         self.edit_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
-        self.edit_label = tk.Label(self.edit_frame, justify="left", text=f"Value:{self.gi_value.get_type()}:")
+        self.edit_label = tk.Label(self.edit_frame, justify="left", text=f"Value : {self.gi_value.get_vtype()}  ")
         self.edit_label.pack(side=tk.LEFT)
+        range = self.gi_key.get_range()
         if self.gi_value.get_type() is bool:
             # ComboBox for booleans and ranges
             self.select_range = tk.StringVar()
             self.edit_value = ttk.Combobox(self.edit_frame, values=("True", "False"), textvariable=self.select_range, state="readonly")
             self.select_range.set(str(self.gi_value.get_value()))
+        elif range and range[0] == 'enum':
+            self.select_range = tk.StringVar()
+            self.edit_value = ttk.Combobox(self.edit_frame, values = range[1], textvariable=self.select_range, state="readonly")
+            self.select_range.set(str(self.gi_value.get_value()))
         else:
             self.edit_value = tk.Text(self.edit_frame, height=1)
             self.edit_value.insert(tk.END, str(self.gi_value.get_value()))
         self.edit_value.pack(side=tk.LEFT, fill=tk.X)
-        self.message_label = tk.Label(self)
-        self.message_label.pack(side=tk.BOTTOM, fill=tk.X)
         self.ok_frame = tk.Frame(self, height=30)
         self.ok_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.button_ok = tk.Button(self.ok_frame, text="OK", command=self.accept_change)
         self.button_ok.pack(side=tk.RIGHT)
         self.button_cancel = tk.Button(self.ok_frame, text="Cancel", command=self.destroy)
         self.button_cancel.pack(side=tk.RIGHT)
+        self.message_label = tk.Label(self)
+        self.message_label.pack(side=tk.BOTTOM, fill=tk.X)
         
     def place(self):
         x =  self.parent.tree_frame.winfo_rootx()
@@ -95,7 +103,7 @@ class GSettingsEditor(tk.Toplevel):
         gi_key, gi_value = gi_dict.get_keyvalue(item_id) 
         root = gi_value.get_key_id()
         data = self.gather_variant(tree, gi_dict, root)
-        gi_variant = GlVariant.AssureVariant(data,  gi_key.key_type.dup_string())
+        gi_variant = GlVariant.AssureVariant(gi_key.key_type,data)
         return gi_variant
     
     def gather_variant(self, tree:ttk.Treeview, gi_dict:GiDict, next, container=False):
@@ -107,6 +115,7 @@ class GSettingsEditor(tk.Toplevel):
             # Debug
             children = [c for c in tree.get_children(next)]
             data = [gi_dict[c] for c in children]
+        
             if vt_str.startswith('a{'):
                 dict = {}
                 for c in tree.get_children(next):
@@ -125,7 +134,6 @@ class GSettingsEditor(tk.Toplevel):
                 
             elif vt_str[0] in "v@":
                 v = self.gather_variant(tree, gi_dict, tree.get_children(next)[0])
-                #v = GLib.Variant.new_variant(v)
                 
             elif vt_str[0] == 'm':
                 # Nullale 
@@ -135,11 +143,14 @@ class GSettingsEditor(tk.Toplevel):
                     v = GLib.Variant.new_maybe(vt, None)
                 else:
                     for node in children:
-                        self.gather_variant(tree, gi_dict, node, depth)
+                        self.gather_variant(tree, gi_dict, node)
             else:
                 # everything else
                 val = gi_dict.get_value(next).get_value()
                 v = val if container else GlVariant(vt_str, val)
+                
+            if gi_value.is_variant():
+                v = GlVariant(vt_str, v)
             return v
         
 
@@ -151,14 +162,13 @@ class GSettingsEditor(tk.Toplevel):
             # ToDo: Create new value here.
             self.destroy()
             return
-        new_value = self.gi_value.get_type() (
-            self.edit_value.get("1.0", "end-1c") \
-            if isinstance(self.edit_value, tk.Text)  else \
-            self.edit_value.get()
-        )
+        if isinstance(self.edit_value, tk.Text):
+            new_value = self.edit_value.get("1.0", "end-1c") 
+        else:
+            new_value = self.edit_value.get()
         try:
             tree.item(selected_item, values=new_value)
-            self.gi_value.set_value(new_value)
+            self.gi_value.set_value(self.gi_value.get_type()(new_value))
             schema_name = self.gi_key.get_schema_name()
             key_name = self.gi_key.get_key_name()
             schema = self.parent.schema_source.lookup(schema_name, False)

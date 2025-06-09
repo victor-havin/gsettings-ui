@@ -35,11 +35,11 @@ class GlVariant(GLib.Variant):
     composite_type_sig : str = "mav@({"
 
     @staticmethod
-    def AssureVariant(input, vtype):
+    def AssureVariant(vt_str, input):
         if isinstance(input, GLib.Variant):
             return input
         else:
-            return GlVariant(vtype, input)
+            return GlVariant(vt_str, input)
         
     @staticmethod    
     def unpack_preserve_variants(variant):
@@ -125,7 +125,7 @@ class GiKey:
             # process the schema key
             # Get metadata like description, default value, constraints, etc.
             description = schema_key.get_description()
-            key_type = schema_key.get_value_type()
+            key_type = schema_key.get_value_type().dup_string()
             default_value = schema_key.get_default_value().unpack()
             value_range = schema_key.get_range()
             summary = schema_key.get_summary()
@@ -136,7 +136,7 @@ class GiKey:
             if key_type:
                 gi_key.key_type = key_type
             if value_range:
-                gi_key.range = value_range
+                gi_key.range = value_range.unpack()
             if summary:
                 gi_key.summary = summary
         return gi_key
@@ -181,6 +181,7 @@ class GiValue:
         self.key_id = key.get_key_id()
         self.value = value
         self.vtype = vtype
+        self.variant = False
         self.compound = False
         
     @classmethod
@@ -196,7 +197,10 @@ class GiValue:
         return self.key.get_key_id()
     
     def set_value(self, value):
-        self.value = value
+        if self.vtype == 'b' and isinstance(value,str):
+            self.value = True if value == 'True' else False
+        else:
+            self.value = value
         
     def get_value(self):
         return self.value
@@ -209,6 +213,12 @@ class GiValue:
     
     def is_compound(self):
         return self.compound
+    
+    def is_variant(self):
+        return self.variant
+    
+    def set_variant(self, is_variant):
+        self.variant = is_variant
 
 class GiDict(dict):
     """ 
@@ -256,3 +266,18 @@ class GiDict(dict):
         else:
             raise TypeError(f"No key or value at {id}")
         return (gi_key, gi_value)
+
+""" 
+common helpers
+"""
+def get_defaultvalue(tree, default_value, value):
+    if type(default_value) in [list, tuple]:
+    # if default is compond and value is not - select the matchiing one
+        if not value.is_compound():
+            selected_item = tree.focus()
+            parent = tree.parent(selected_item)
+            index = tree.get_children(parent).index(selected_item)
+            selected_value = default_value[index]
+            return selected_value
+    return default_value
+                        
