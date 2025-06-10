@@ -69,6 +69,22 @@ class GlVariant(GLib.Variant):
         else:  # Unpack primitive values
             return variant.unpack()
 
+    @staticmethod
+    def new_data(vt_str):
+        if vt_str == 'b':
+            data = False
+        elif vt_str == 's':
+            data = ''
+        elif vt_str in "nqiuxtd":
+            data = 0
+        return data
+
+    @staticmethod
+    def new_variant(vt_str):
+        var = GlVariant(vt_str, GlVariant.new_data(vt_str))
+        return var
+        
+
 class GiSchema:
     """
     Gio Schema
@@ -266,6 +282,26 @@ class GiDict(dict):
         else:
             raise TypeError(f"No key or value at {id}")
         return (gi_key, gi_value)
+    
+    def add_gidata(self, current, key_id, schema, name, data, variant):
+        # generate Keys and values
+        tv = data.get_type_string() if data != None else '?'
+        # Set the root key
+        root_key = current if key_id == None else key_id
+
+        if key_id:
+            gi_key = self.get_key(root_key)
+            value = GiValue.factory(gi_key, data.unpack(), tv)
+            value.set_variant(variant)
+            self[current] = value
+            
+        else:
+            gi_key = GiKey.factory(schema, name, current)
+            self[current] = gi_key
+            if data != None:
+                value = (GiValue.factory(gi_key, data.unpack(), tv))
+                value.set_variant(variant)
+                gi_key.set_value(value)
 
 """ 
 common helpers

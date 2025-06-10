@@ -103,7 +103,9 @@ class GSettingsViewer(tk.Tk):
         self. SEARCH_DELAY :int = 300       # At least SEARCH_DELAY between searches
         self.mydir = path.dirname(__file__)
         self.schema_source = None
-        self.schema_type = "Installed"      # "Installed" or "Relocatable"
+        self.schema_types = ("Installed", "Relocatable") 
+        self.schema_type = tk.StringVar()
+        self.location = None
         # Search results
         self.search_results : SearchResults = SearchResults()
         self.after_id = 0  # ID for the after method used in search
@@ -114,7 +116,7 @@ class GSettingsViewer(tk.Tk):
         # Do UI layout
         self.do_layout()        
         # Load schemas
-        self.load_schemas()
+        self.load_schemas(self.schema_type.get())
         
     """ UI Layout """
 
@@ -135,16 +137,13 @@ class GSettingsViewer(tk.Tk):
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
         self.toolbar.pack_propagate(False) 
         self.toolbar.bind("<Configure>", self.redo_toolbar_layout)  # Bind resize event to redo layout
-        # Paned window for layout
-        self.paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
-        self.paned_window.pack(fill=tk.BOTH, expand=True)
         # Status bar for messages
         self.status_bar = tk.Label(self, bd=1, relief=tk.SUNKEN, anchor=tk.W, text="")
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, expand=False)
         # Add a path editor to the toolbar
-        self.path_text = tk.Entry(self.toolbar, width=30)
-        self.path_text.pack(side=tk.LEFT, padx=5, pady=5)
-        self.path_text.bind("<Return>", lambda event: self.load_schemas(self.path_text.get()))
+        self.path_entry = tk.Entry(self.toolbar, width=30)
+        self.path_entry.pack(side=tk.LEFT, padx=5, pady=5)
+        self.path_entry.bind("<Return>", lambda event: self.load_schemas(self.schema_type.get(), self.path_entry.get()))
         # Add Browse buttton to the toolbar
         self.browse_button = tk.Button(self.toolbar, image=self.ico_folder, command=self.open_location)
         self.browse_button.pack(side=tk.LEFT, padx=5, pady=5)
@@ -170,7 +169,18 @@ class GSettingsViewer(tk.Tk):
         # Add search [current/total] label to toolbar
         self.search_label = tk.Label(self.toolbar, text="[0/0]")
         self.search_label.pack(side=tk.LEFT, padx=5, pady=5)
-                
+
+        # second toolbar
+        self.toolbar2 = tk.Frame(self, height=30)
+        self.toolbar2.pack(side=tk.TOP, fill=tk.X)
+        self.type_selector = ttk.Combobox(self.toolbar2, width=10, values=self.schema_types, textvariable=self.schema_type, state="readonly")
+        self.schema_type.set(self.schema_types[0])
+        self.type_selector.pack(side=tk.LEFT, padx=5, pady=5)
+        self.type_selector.bind("<<ComboboxSelected>>", self.schema_type_handle)
+          
+        # Paned window for layout
+        self.paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        self.paned_window.pack(fill=tk.BOTH, expand=True)
         # Treeview frame
         self.tree_frame = ttk.Frame(self.paned_window)
         self.tree_frame.bind("<Configure>", self.tree_frame_handle)
@@ -216,6 +226,7 @@ class GSettingsViewer(tk.Tk):
         self.search_text.focus_set()  # Set focus to the search entry
         # Load Icons
  
+    # Load icons from default location
     def LoadIcons(self):
         #toolbar icons
         try:
@@ -255,35 +266,27 @@ class GSettingsViewer(tk.Tk):
            
     ## Load schemas
     ## This function loads the GSettings schemas from the system and populates the treeview with them.
-    def load_schemas(self, location=None):
-#         try:
+    def load_schemas(self, schema_type, location=None):
+        
+        try:
+            default_source = None
             # Clear the treeview
             self.tree.delete(*self.tree.get_children())
             self.gi_dict.clear()  # Clear the GiData dictionary
+            default_source = Gio.SettingsSchemaSource.get_default()
             if location == None:
-                self.schema_source = Gio.SettingsSchemaSource.get_default()
+                self.schema_source = default_source
                 installed,relocatable = self.schema_source.list_schemas(False)
             else:
                 # Load schemas from the specified location
                 self.schema_source = Gio.SettingsSchemaSource.new_from_directory(location, Gio.SettingsSchemaSource.get_default(), True)
                 installed, relocatable  = self.schema_source.list_schemas(False)
-            schemas = installed if self.schema_type == 'Installed' else relocatable
-            self.status_bar.config(text=f"{self.schema_type} Schema Source {location if location else ''}")
+            schemas = installed if schema_type == 'Installed' else relocatable
+            self.status_bar.config(text=f"{schema_type} Schema Source {location if location else ''}")
                 
             if not schemas:
                 self.status_bar.config(text="No schemas found.")
                 return
-
-            # Validate the location
-            # ToDo: 
-            # 1. More rigorous validation
-            # 2. Check if the location exists
-            if location:
-                if(location[-1] != '/'):
-                    location += '/'
-                if not Gio.File.new_for_path(location).query_exists(None):
-                    self.status_bar.config(text=f"Path {location} does not exist.")
-                    return
 
             # Insert schemas into the treeview
             for schema_id in schemas:
@@ -298,27 +301,45 @@ class GSettingsViewer(tk.Tk):
                         node = self.tree.insert(parent, "end", node_id, text=part, values=(), tags=("type", self.NodeType.SCHEMA), image=self.ico_schema)
                         self.gi_dict[node] = GiSchema.factory(node_id)
                     parent = node_id
-                if self.schema_type == "Relocatable" and not location:
+                # For relocatable without location and installed with location
+                # we can only list schema names - no data
+                
+                if schema_type == "Relocatable" and not location:
+                    # Can't open relocatable schemas without location
+                    self.tree.item(node, values=("Relocatable",))
                     continue
                 # At this point parent is the full schema_id node
                 # Now parse the settings
                 settings = None
                 if schema:
+                    installed = default_source.lookup(schema.get_id(), False)
+                    if (not installed):
+                        # Schema not installed
+                        self.tree.item(node, values=("Not installed",))
+                        continue
+                    #if(not source.get_path()):
+                    #    continue
                     if(location):
-                        id = schema.get_id()
-                        # Ensure the schema is relocatable
-                        settings = Gio.Settings.new_with_path(id, location)
+                        # Check location
+                        path = schema.get_path()
+                        if(path and path != location):
+                            self.tree.item(node, values=("Wrong location",))
+                            continue
+                        settings = Gio.Settings.new_with_path(schema.get_id(), location)
                     else:
                         settings = Gio.Settings.new(schema.get_id())
                     if settings is None:
+                        # No settings in schema
+                        # This is odd.
                         continue
+                    # Process keys
                     for key in schema.list_keys():
                         val = settings.get_value(key)
                         data = val.unpack()
                         self.parse_key(parent, None, key, val, schema)
                             
-#        except Exception as e:
-#            self.status_bar.config(text=f"Error loading schemas: {e}")
+        except Exception as e:
+            self.status_bar.config(text=f"Error loading schemas: {e}")
 
     def parse_key(self, parent, key_id, name, data, schema, variant=False):
         # variant type
@@ -326,6 +347,7 @@ class GSettingsViewer(tk.Tk):
         nullable = False
         tv = data.get_type_string() if data != None else "?"
         is_variant = tv in "v@"
+        gi_dict = self.gi_dict
 
         # Unpack variant
         if data != None:
@@ -336,12 +358,12 @@ class GSettingsViewer(tk.Tk):
                     current = self.insert(parent, name, unpacked, self.NodeType.KEY)
                 else:
                     current = self.insert(parent, name, unpacked, self.NodeType.VALUE)
-                self.add_gidata(current, key_id, schema, name, data, variant)
+                gi_dict.add_gidata(current, key_id, schema, name, data, variant)
             else:
                 # Do not insert variant types into tree. Instead mark data as variant.
                 if not is_variant or (is_variant and key_id == None):
                     current = self.insert(parent, name, tv, self.NodeType.COMPOUND)
-                    self.add_gidata(current, key_id, schema, name, data, variant)
+                    gi_dict.add_gidata(current, key_id, schema, name, data, variant)
                 if is_variant and key_id != None:
                     current = parent 
                     
@@ -360,7 +382,7 @@ class GSettingsViewer(tk.Tk):
                         # list/array/tuple         
                         d = data.get_child_value(i)
                         self.parse_key(current, root_key, str(i), d, schema)
-            elif tv[0] in "v@":
+            elif is_variant:
                 for i in range(data.n_children()):
                     d = data.get_child_value(i)
                     self.parse_key(current, root_key, name, d, schema, variant=True)
@@ -375,30 +397,10 @@ class GSettingsViewer(tk.Tk):
         else:
             # If the value is not set, just insert the key
             current = self.insert(parent, name, "", self.NodeType.KEY)
-            self.add_gidata(current, key_id, schema, name, data, variant)
+            gi_dict.add_gidata(current, key_id, schema, name, data, variant)
 
         return current
-
-    def add_gidata(self, current, key_id, schema, name, data, variant):
-        # generate Keys and values
-        tv = data.get_type_string() if data != None else '?'
-        # Set the root key
-        root_key = current if key_id == None else key_id
-
-        if key_id:
-            gi_key = self.gi_dict.get_key(root_key)
-            value = GiValue.factory(gi_key, data.unpack(), tv)
-            value.set_variant(variant)
-            self.gi_dict[current] = value
-            
-        else:
-            gi_key = GiKey.factory(schema, name, current)
-            self.gi_dict[current] = gi_key
-            if data != None:
-                value = (GiValue.factory(gi_key, data.unpack(), tv))
-                value.set_variant(variant)
-                gi_key.set_value(value)
-    
+     
     """ Event handlers"""
     ## Redo toolbar layout
     ## This function is called when the toolbar is resized.
@@ -407,7 +409,7 @@ class GSettingsViewer(tk.Tk):
             # If an event is passed, adjust the layout based on the new size
             
             # Measure font
-            font = tkFont.Font(font=self.path_text["font"])
+            font = tkFont.Font(font=self.path_entry["font"])
             char_width = font.measure('0') or 10
             # Reserve space for other widgets
             # ToDo: May be calculate reserves from sizes of other widgets
@@ -419,9 +421,16 @@ class GSettingsViewer(tk.Tk):
             # ToDo: Maybe add a slider bar in the future.
             path_text_chars = int(((event.width/2) - path_reserve)/char_width)
             path_text_chars = max(10, path_text_chars)
-            self.path_text.config(width=path_text_chars)
+            self.path_entry.config(width=path_text_chars)
             search_text_chars = int((event.width/2 - search_reserve)/char_width)
             self.search_text.config(width=max(10,search_text_chars))
+ 
+    ## Schema type handle
+    def schema_type_handle(self, event):
+        schema_type = self.schema_type.get()
+        location = self.path_entry.get()
+        location = location if location != '' else None
+        self.load_schemas(schema_type, location)
  
     ## Selection Handle
     ## This function is called when a selection is made in the treeview.
@@ -442,19 +451,24 @@ class GSettingsViewer(tk.Tk):
         self.tree.heading("#0", text=full_path, anchor="w")
         # Update the text pane with details of the selected item
         self.update_text_pane(selected_item)
-    #
+
+    # Sync editor to the tree frame
     def tree_frame_handle(self, event):
         if self.gsedit:
             self.gsedit.place()
     
-    #
+    # Start the editor
     def edit_handle(self, event):
         if event.type is tk.EventType.KeyRelease and event.keysym != 'Return':
             return
         selected_item = self.tree.focus()
+        gi_data = self.gi_dict.get(selected_item, None)
+        if isinstance(gi_data, GiSchema):
+            # Can't edit schemas
+            return
         children = self.tree.get_children(selected_item)
         if(len(children) == 0):
-            #messagebox.showinfo("Warning", "Edit mode not yet implemented")
+            # It is a leaf node. Edit.
             self.gsedit = GSettingsEditor(self)
             self.gsedit.show()
             self.gsedit = None
@@ -534,21 +548,38 @@ class GSettingsViewer(tk.Tk):
     ## This function loads the default GSettings schema location and populates the treeview with schemas.
     def load_default(self):
         # Clear path text
-        self.path_text.delete(0, tk.END)
+        self.path_entry.delete(0, tk.END)
+        #set type to Installed
+        self.schema_type.set(self.schema_types[0])
         # Load schemas from the default location
-        self.load_schemas()
+        self.load_schemas(self.schema_type.get())
  
     ## Open schema location
     ## This function is called when the Open button is clicked.
     ## It opens a file dialog to select a GSettings schema location and loads the schemas from that location.
     def open_location(self):
         # Open a file dialog to select a GSettings schema location
-        location = tk.filedialog.askdirectory(title="Select Schema Location", initialdir=self.path_text.get())
+        location = tk.filedialog.askdirectory(title="Select Schema Location", initialdir=self.path_entry.get())
+        # Validate the location
+        # ToDo: 
+        # 1. More rigorous validation
+        # 2. Check if the location exists
         if location:
-            self.path_text.delete(0, tk.END)  # Clear the path text entry
-            self.path_text.insert(0, location)  # Insert the selected path
+            if(location[-1] != '/'):
+                location += '/'
+            if not Gio.File.new_for_path(location).query_exists(None):
+                self.status_bar.config(text=f"Path {location} does not exist.")
+                return
+        # Remember location
+        self.location = location
+        # Set type to "Relocatable"
+        self.schema_type.set(self.schema_types[1])
+        
+        if self.location:
+            self.path_entry.delete(0, tk.END)  # Clear the path text entry
+            self.path_entry.insert(0, self.location)  # Insert the selected path
             # Load schemas from the selected location
-            self.load_schemas(location)
+            self.load_schemas(self.schema_type.get(), self.location)
 
     """ Helper functions """
     

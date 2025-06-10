@@ -1,5 +1,6 @@
 """
  gsettings editor
+ 
 """
 
 # import tkinter
@@ -17,7 +18,13 @@ import gimodel
 from gimodel import *
 
 class GSettingsEditor(tk.Toplevel):
+    """
+    GSettingsEditor dialog.
+    It gets created on top of the tree view frame and
+    does the key data editing.
+    """
 
+    # Constructor
     def __init__(self, parent):
         super().__init__(parent)
         self.gi_value: GiValue = None
@@ -25,21 +32,21 @@ class GSettingsEditor(tk.Toplevel):
         self.parent = parent
         self.process_data(self.parent)
         self.do_layout(self.parent)        
-        
+    
+    # Destructor
     def destroy(self):
         self.after_cancel(self.place)
         super().destroy()
         
+    # Layout manager
     def do_layout(self, parent):
         # Setup window
         self.overrideredirect(True)
         self.title("GNOME GSettings Editor")
         self.wm_title = "gsettings_ui"
         self.place()
-        #self.resizable(False, False)
 
         # Add widgets
-        
         self.info_frame = tk.Frame(self)
         self.label_info = tk.Label(self.info_frame, justify="left")
         self.label_info.configure(text=f"Schema: {self.gi_key.get_schema_name()}\nKey: {self.gi_key.get_key_name()}")
@@ -63,7 +70,7 @@ class GSettingsEditor(tk.Toplevel):
             self.edit_value = ttk.Combobox(self.edit_frame, values = range[1], textvariable=self.select_range, state="readonly")
             self.select_range.set(str(self.gi_value.get_value()))
         else:
-            self.edit_value = tk.Text(self.edit_frame, height=1)
+            self.edit_value = tk.Entry(self.edit_frame, width=60)
             self.edit_value.insert(tk.END, str(self.gi_value.get_value()))
         self.edit_value.pack(side=tk.LEFT, fill=tk.X)
         self.ok_frame = tk.Frame(self, height=30)
@@ -74,7 +81,9 @@ class GSettingsEditor(tk.Toplevel):
         self.button_cancel.pack(side=tk.RIGHT)
         self.message_label = tk.Label(self)
         self.message_label.pack(side=tk.BOTTOM, fill=tk.X)
-        
+
+    # Placement.
+    # Makes sure it is on top of the tree view.        
     def place(self):
         x =  self.parent.tree_frame.winfo_rootx()
         y =  self.parent.tree_frame.winfo_rooty()
@@ -83,6 +92,7 @@ class GSettingsEditor(tk.Toplevel):
         self.geometry(f"{w}x{h}+{x}+{y}")
         self.after(100, self.place)
 
+    # Modal dialog
     def show(self):
         self.transient(self.parent)
         self.wait_visibility(self)
@@ -90,12 +100,16 @@ class GSettingsEditor(tk.Toplevel):
         self.focus_set()
         self.wait_window(self)
 
+    # Get data from the parent
     def process_data(self, parent):
         tree = parent.tree
         gi_dict = parent.gi_dict
         item = tree.focus()
         self.gi_key, self.gi_value = gi_dict.get_keyvalue(item)
                     
+    # Rebuild tree item
+    # Very cool algorithm that gathers a variant from the 
+    # key subtree.
     def rebuild_item(self, item_id):
         tree : ttk.Treeview = self.parent.tree
         
@@ -106,6 +120,7 @@ class GSettingsEditor(tk.Toplevel):
         gi_variant = GlVariant.AssureVariant(gi_key.key_type,data)
         return gi_variant
     
+    # Recursive variant gathereing
     def gather_variant(self, tree:ttk.Treeview, gi_dict:GiDict, next, container=False):
         gi_key, gi_value = gi_dict.get_keyvalue(next)
         vt_str = gi_value.get_vtype()
@@ -153,19 +168,16 @@ class GSettingsEditor(tk.Toplevel):
                 v = GlVariant(vt_str, v)
             return v
         
-
+    # Accept change
     def accept_change(self):
         is_ok = True
         tree = self.parent.tree
+        location = self.parent.location
         selected_item = tree.focus()
         if self.gi_value.get_value() == None:
             # ToDo: Create new value here.
-            self.destroy()
-            return
-        if isinstance(self.edit_value, tk.Text):
-            new_value = self.edit_value.get("1.0", "end-1c") 
-        else:
-            new_value = self.edit_value.get()
+            self.create_value(selected_item)
+        new_value = self.edit_value.get()
         try:
             tree.item(selected_item, values=new_value)
             self.gi_value.set_value(self.gi_value.get_type()(new_value))
@@ -174,7 +186,10 @@ class GSettingsEditor(tk.Toplevel):
             schema = self.parent.schema_source.lookup(schema_name, False)
             if(schema):
                 variant = self.rebuild_item(selected_item)
-                settings = Gio.Settings.new(schema_name)
+                if location:
+                    settings = Gio.Settings.new_with_path(schema_name, location)
+                else:
+                    settings = Gio.Settings.new(schema_name)
                 settings.set_value(key_name, variant)
         except Exception as e:
             error_msg = f"{e}";
@@ -183,7 +198,18 @@ class GSettingsEditor(tk.Toplevel):
         if is_ok:
             self.destroy()
 
-
+    def create_value(self, item):
+        tree = self.parent.tree
+        gi_dict = self.parent.gi_dict
+        key,val = gi_dict.get_keyvalue(item)
+        vt_str = key.get_type()
+        if(vt_str in GlVariant.base_type_sig):
+            data = GlVariant.new_data(vt_str)
+            val = GiValue.factory(key, data, vt_str)
+            key.set_value(val)
+        
+            
+    # Find root key for a data item
     def find_root(self, item):
         tree = self.parent.tree
         dict = self.parent.gi_dict
