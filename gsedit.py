@@ -32,10 +32,12 @@ class GSettingsEditor(tk.Toplevel):
         self.parent = parent
         self.process_data(self.parent)
         self.do_layout(self.parent)        
+        self.place_after_id = None
     
     # Destructor
     def destroy(self):
-        self.after_cancel(self.place)
+        if self.place_after_id:
+            self.after_cancel(self.place_after_id)
         super().destroy()
         
     # Layout manager
@@ -47,7 +49,9 @@ class GSettingsEditor(tk.Toplevel):
         self.place()
 
         # Add widgets
-        self.info_frame = tk.Frame(self)
+        self.bind("<Escape>", self.reject_change)
+
+        self.info_frame = ttk.Frame(self)
         self.label_info = tk.Label(self.info_frame, justify="left")
         self.label_info.configure(text=f"Schema: {self.gi_key.get_schema_name()}\nKey: {self.gi_key.get_key_name()}")
         default_value = self.gi_key.get_default_value()
@@ -73,11 +77,12 @@ class GSettingsEditor(tk.Toplevel):
             self.edit_value = tk.Entry(self.edit_frame, width=60)
             self.edit_value.insert(tk.END, str(self.gi_value.get_value()))
         self.edit_value.pack(side=tk.LEFT, fill=tk.X)
+        self.edit_value.focus_set()
         self.ok_frame = tk.Frame(self, height=30)
         self.ok_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.button_ok = tk.Button(self.ok_frame, text="OK", command=self.accept_change)
         self.button_ok.pack(side=tk.RIGHT)
-        self.button_cancel = tk.Button(self.ok_frame, text="Cancel", command=self.destroy)
+        self.button_cancel = tk.Button(self.ok_frame, text="Cancel", command=self.reject_change)
         self.button_cancel.pack(side=tk.RIGHT)
         self.message_label = tk.Label(self)
         self.message_label.pack(side=tk.BOTTOM, fill=tk.X)
@@ -90,15 +95,14 @@ class GSettingsEditor(tk.Toplevel):
         w =  self.parent.tree_frame.winfo_width() 
         h =  self.parent.tree_frame.winfo_height() 
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.after(100, self.place)
+        #self.place_after_id = self.after(200, self.place)
 
     # Modal dialog
     def show(self):
         self.transient(self.parent)
         self.wait_visibility(self)
         self.grab_set()
-        self.focus_set()
-        self.wait_window(self)
+        #self.wait_window(self)
 
     # Get data from the parent
     def process_data(self, parent):
@@ -169,7 +173,7 @@ class GSettingsEditor(tk.Toplevel):
             return v
         
     # Accept change
-    def accept_change(self):
+    def accept_change(self, event=None):
         is_ok = True
         tree = self.parent.tree
         location = self.parent.location
@@ -197,6 +201,10 @@ class GSettingsEditor(tk.Toplevel):
             is_ok = False
         if is_ok:
             self.destroy()
+        return
+            
+    def reject_change(self, even=None):
+        self.destroy()
 
     def create_value(self, item):
         tree = self.parent.tree
@@ -216,4 +224,3 @@ class GSettingsEditor(tk.Toplevel):
         while not isinstance(dict[item], GiKey):
             item = tree.parent(item)
         return item
-    

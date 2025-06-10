@@ -194,7 +194,7 @@ class GSettingsViewer(tk.Tk):
         self.tree_scrollbar = tk.Scrollbar(self.tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y) 
         self.tree.configure(yscrollcommand=self.tree_scrollbar.set)
-        self.tree.pack(fill=tk.BOTH, padx=1, pady=5, expand=True)
+        self.tree.pack(fill=tk.BOTH, padx=1, pady=1, expand=True)
         self.tree.bind("<Double-1>", self.edit_handle)
         self.tree.bind("<KeyRelease>", self.edit_handle)
         # Text frame for schema details
@@ -361,8 +361,9 @@ class GSettingsViewer(tk.Tk):
                 gi_dict.add_gidata(current, key_id, schema, name, data, variant)
             else:
                 # Do not insert variant types into tree. Instead mark data as variant.
+                node_type = self.NodeType.COMPOUND if key_id else self.NodeType.KEY
                 if not is_variant or (is_variant and key_id == None):
-                    current = self.insert(parent, name, tv, self.NodeType.COMPOUND)
+                    current = self.insert(parent, name, tv, node_type)
                     gi_dict.add_gidata(current, key_id, schema, name, data, variant)
                 if is_variant and key_id != None:
                     current = parent 
