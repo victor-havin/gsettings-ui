@@ -125,6 +125,8 @@ class GSettingsViewer(tk.Tk):
     ## text pane, and status bar.
     ## It also binds events for resizing the toolbar and handling selections in the treeview.
     def do_layout(self):
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
         self.LoadIcons()
         # Set main window props
         self.title("GNOME GSettings Viewer")
@@ -153,7 +155,6 @@ class GSettingsViewer(tk.Tk):
         # Add separator to the toolbar
         self.toolbar_separator = ttk.Separator(self.toolbar, orient=tk.VERTICAL)
         self.toolbar_separator.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
-
         # Add result label to the toolbar
         self.search_icon = tk.Label(self.toolbar, image=self.ico_glass)
         self.search_icon.pack(side=tk.LEFT, padx=5, pady=5)
@@ -169,22 +170,22 @@ class GSettingsViewer(tk.Tk):
         # Add search [current/total] label to toolbar
         self.search_label = tk.Label(self.toolbar, text="[0/0]")
         self.search_label.pack(side=tk.LEFT, padx=5, pady=5)
-
         # second toolbar
         self.toolbar2 = tk.Frame(self, height=30)
         self.toolbar2.pack(side=tk.TOP, fill=tk.X)
+        self.selector_label = ttk.Label(self.toolbar2, text="Schema Source: ")
+        self.selector_label.pack(side=tk.LEFT, padx=5, pady=5)
         self.type_selector = ttk.Combobox(self.toolbar2, width=10, values=self.schema_types, textvariable=self.schema_type, state="readonly")
         self.schema_type.set(self.schema_types[0])
         self.type_selector.pack(side=tk.LEFT, padx=5, pady=5)
         self.type_selector.bind("<<ComboboxSelected>>", self.schema_type_handle)
-          
         # Paned window for layout
         self.paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         # Treeview frame
         self.tree_frame = ttk.Frame(self.paned_window)
-        self.tree_frame.bind("<Configure>", self.tree_frame_handle)
         self.tree_frame.pack(fill=tk.BOTH, expand=True)
+        #self.tree_frame.pack(fill=tk.BOTH, expand=True)
         # Treeview for schemas
         self.tree = ttk.Treeview(self.tree_frame, columns=("Value", ), show="tree headings")
         self.tree.heading("Value", text="Value")
@@ -196,11 +197,11 @@ class GSettingsViewer(tk.Tk):
         self.tree.configure(yscrollcommand=self.tree_scrollbar.set)
         self.tree.pack(fill=tk.BOTH, padx=1, pady=1, expand=True)
         self.tree.bind("<Double-1>", self.edit_handle)
-        self.tree.bind("<KeyRelease>", self.edit_handle)
+        self.tree.bind("<Return>", self.edit_handle)
         # Text frame for schema details
         self.text_frame = ttk.Frame(self.paned_window)
         self.text_frame.pack(fill=tk.BOTH, expand=True)
-
+        #self.text_frame.pack(fill=tk.BOTH, expand=True)
         # Text pane for schema details
         self.text = tk.Text(self.text_frame, wrap="word", height=10, width=40)
         # Add tags for text formatting
@@ -216,15 +217,14 @@ class GSettingsViewer(tk.Tk):
         # Bind copy and paste actions to the text pane
         self.text.bind("<Control-c>", self.copy_text)
 
-        # Add views to the paned window
-        self.paned_window.add(self.tree_frame, weight=1)
-        self.paned_window.add(self.text_frame, weight=2)
-        self.paned_window.pack(fill=tk.BOTH, expand=True)
+        # Addd tree and text to paned window
+        self.paned_window.add(self.text_frame)
+        self.paned_window.insert(0, self.tree_frame)
+       
         self.iconphoto(True, self.ico_check) # Set main window icon
         self.update_idletasks()  # Ensure the layout is updated
         self.minsize(400, 400)  # Set minimum size for the main window
         self.search_text.focus_set()  # Set focus to the search entry
-        # Load Icons
  
     # Load icons from default location
     def LoadIcons(self):
@@ -282,7 +282,7 @@ class GSettingsViewer(tk.Tk):
                 self.schema_source = Gio.SettingsSchemaSource.new_from_directory(location, Gio.SettingsSchemaSource.get_default(), True)
                 installed, relocatable  = self.schema_source.list_schemas(False)
             schemas = installed if schema_type == 'Installed' else relocatable
-            self.status_bar.config(text=f"{schema_type} Schema Source {location if location else ''}")
+            self.status_bar.config(text=f"{schema_type} Schema Source from {location if location else 'Default Location'}")
                 
             if not schemas:
                 self.status_bar.config(text="No schemas found.")
@@ -403,6 +403,13 @@ class GSettingsViewer(tk.Tk):
         return current
      
     """ Event handlers"""
+    def on_close(self):
+        if self.gsedit:
+            self.gsedit.destroy()
+            self.gsedit = None
+        self.destroy()
+        
+            
     ## Redo toolbar layout
     ## This function is called when the toolbar is resized.
     def redo_toolbar_layout(self, event):
@@ -452,12 +459,7 @@ class GSettingsViewer(tk.Tk):
         self.tree.heading("#0", text=full_path, anchor="w")
         # Update the text pane with details of the selected item
         self.update_text_pane(selected_item)
-
-    # Sync editor to the tree frame
-    def tree_frame_handle(self, event):
-        if self.gsedit:
-            self.gsedit.place()
-    
+   
     # Start the editor
     def edit_handle(self, event):
         if event.type is tk.EventType.KeyRelease and event.keysym != 'Return':
@@ -467,13 +469,52 @@ class GSettingsViewer(tk.Tk):
         if isinstance(gi_data, GiSchema):
             # Can't edit schemas
             return
-        children = self.tree.get_children(selected_item)
-        if(len(children) == 0):
-            # It is a leaf node. Edit.
-            self.gsedit = GSettingsEditor(self)
-            self.gsedit.show()
-            self.gsedit = None
+        _,val = self.gi_dict.get_keyvalue(selected_item)
+        if not val.is_compound():
+            self.do_edit()
 
+    # Create GsEdit and put it in place of the tree pane
+    def do_edit(self):
+        widgets =  [
+            self.path_entry,
+            self.browse_button,
+            self.default_button,
+            self.search_text,
+            self.search_prev_button,
+            self.search_next_button,
+            self.type_selector
+        ]
+        #disable widgets
+        for w in widgets:
+            w.config(state="disabled")
+        self.path_entry.config(state="disabled")
+        self.browse_button.config(state="disabled")
+        self.default_button.config(state="disabled")
+
+        # Swap the tree view for the editor
+        height = self.tree_frame.winfo_height()
+        self.gsedit = GSettingsEditor(self.paned_window)
+        self.gsedit.pack(fill="both", expand=True)
+        self.paned_window.forget(self.tree_frame)
+        self.paned_window.insert(0, self.gsedit)
+        self.paned_window.update_idletasks()
+        self.paned_window.sashpos(0, height)
+        # Wait for the editor to exit
+        self.gsedit.wait_window()
+        # If application is not exiting
+        if self.gsedit:
+            # Set focus back to tree
+            self.tree.focus_set()
+            # Enable widgets
+            for w in widgets:
+                w.config(state="normal")
+            self.type_selector.config(state="readonly")
+            # Restore the tree view
+            self.paned_window.insert(0, self.tree_frame)
+            self.paned_window.update_idletasks()
+            self.paned_window.sashpos(0, height)
+        self.gsedit = None
+        
     ## Search handle
     def search_handle(self, event):
         # If the key is a special key, handle it separately
