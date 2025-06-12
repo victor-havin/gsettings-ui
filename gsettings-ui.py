@@ -267,12 +267,10 @@ class GSettingsViewer(tk.Tk):
     ## Load schemas
     ## This function loads the GSettings schemas from the system and populates the treeview with them.
     def load_schemas(self, schema_type, location=None):
-        
         try:
+            self.reset_all()
             default_source = None
             # Clear the treeview
-            self.tree.delete(*self.tree.get_children())
-            self.gi_dict.clear()  # Clear the GiData dictionary
             default_source = Gio.SettingsSchemaSource.get_default()
             if location == None:
                 self.schema_source = default_source
@@ -492,7 +490,7 @@ class GSettingsViewer(tk.Tk):
         self.default_button.config(state="disabled")
 
         # Swap the tree view for the editor
-        height = self.tree_frame.winfo_height()
+        height = self.paned_window.sashpos(0)
         self.gsedit = GSettingsEditor(self.paned_window)
         self.gsedit.pack(fill="both", expand=True)
         self.paned_window.forget(self.tree_frame)
@@ -624,6 +622,14 @@ class GSettingsViewer(tk.Tk):
             self.load_schemas(self.schema_type.get(), self.location)
 
     """ Helper functions """
+    # Reset all 
+    # Clear text, tree and dictionary
+    def reset_all(self):
+        self.gi_dict.clear()  # Clear the GiData dictionary
+        self.tree.delete(*self.tree.get_children())
+        self.text.config(state=tk.NORMAL)
+        self.text.delete(1.0, tk.END)
+        self.text.config(state=tk.DISABLED)
     
     ## Get full path
     ## Helper function for getting the full path of a selected item in the treeview.    
