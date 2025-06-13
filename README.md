@@ -10,9 +10,13 @@
 - 🚀 View GNOME settings in a simple UI
 - 🔍 Incrementally search keys
 - 🛠️ Examine key values, descriptions, defaults, and ranges
+- 🛠️ Edit existing key values
 
-## Screenshot
-![Screenshot](images/Screenshot.png)
+## Screenshot 1: Schema viewer
+![Screenshot](images/Screenshot.Viewer.png)
+
+## Screenshot 2: Key editor
+![Screenshot](images/Screenshot.Editor.png)
 
 ## Installation
 
