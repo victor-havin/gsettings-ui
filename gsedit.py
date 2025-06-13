@@ -121,29 +121,18 @@ class GSettingsEditor(ttk.Frame):
         if not gi_value.is_compound():
             return gi_value.get_value()
         else:
-            # Debug
-            children = [c for c in tree.get_children(next)]
-            data = [gi_dict[c] for c in children]
-        
             if vt_str.startswith('a{'):
-                dict = {}
-                for c in tree.get_children(next):
-                    key = tree.item(c, "text")
-                    val = self.gather_variant(tree, gi_dict, c, True)
-                    dict[key] = val
+                #dictionary
+                dict = {tree.item(id, "text"):self.gather_variant(
+                    tree, gi_dict, id, True) for id in tree.get_children(next)}
                 v = dict if container else GlVariant(vt_str, dict)
-                
             elif vt_str[0] in "a[(":
-                #list = [self.gather_variant(tree, gi_dict, id) for id in tree.get_children(next)]
-                list = []
-                for c in tree.get_children(next):
-                    val = self.gather_variant(tree, gi_dict, c, True)
-                    list.append(val)
+                # Container
+                list = [self.gather_variant(
+                    tree, gi_dict, id, True) for id in tree.get_children(next)]
                 v = list if container else GlVariant(vt_str, list)
-                
             elif vt_str[0] in "v@":
                 v = self.gather_variant(tree, gi_dict, tree.get_children(next)[0])
-                
             elif vt_str[0] == 'm':
                 # Nullale 
                 children = tree.get_children(next)
@@ -157,8 +146,8 @@ class GSettingsEditor(ttk.Frame):
                 # everything else
                 val = gi_dict.get_value(next).get_value()
                 v = val if container else GlVariant(vt_str, val)
-                
             if gi_value.is_variant():
+                # Variant wrapper
                 v = GlVariant(vt_str, v)
             return v
         

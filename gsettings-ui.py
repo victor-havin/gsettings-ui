@@ -402,9 +402,7 @@ class GSettingsViewer(tk.Tk):
             gi_dict.add_gidata(current, key_id, schema, settings, name, data, variant)
         # Add decorations if there are special key properties present
         self.maybe_decorate(current)
-
         return current
-    
    
     """ Event handlers"""
     
