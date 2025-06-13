@@ -198,6 +198,8 @@ class GSettingsViewer(tk.Tk):
         self.tree.pack(fill=tk.BOTH, padx=1, pady=1, expand=True)
         self.tree.bind("<Double-1>", self.edit_handle)
         self.tree.bind("<Return>", self.edit_handle)
+        # Configure tags
+        self.tree.tag_configure("readonly", foreground="grey")
         # Text frame for schema details
         self.text_frame = ttk.Frame(self.paned_window)
         self.text_frame.pack(fill=tk.BOTH, expand=True)
@@ -206,6 +208,7 @@ class GSettingsViewer(tk.Tk):
         self.text = tk.Text(self.text_frame, wrap="word", height=10, width=40)
         # Add tags for text formatting
         self.text.tag_configure("bold_blue", foreground="blue", font=("Arial", 10, "bold"))
+        self.text.tag_configure("bold_red", foreground="red", font=("Arial", 10, "bold"))
         self.text.tag_configure("underline_blue", foreground="blue", font=("Arial", 10, "underline italic"))
         self.text.tag_configure("regular", foreground="black", font=("Arial", 10, "normal"))
         self.text.config(state=tk.DISABLED)  # Make text pane read-only initially
@@ -334,12 +337,12 @@ class GSettingsViewer(tk.Tk):
                     for key in schema.list_keys():
                         val = settings.get_value(key)
                         data = val.unpack()
-                        self.parse_key(parent, None, key, val, schema)
+                        self.parse_key(parent, None, key, val, schema, settings)
                             
         except Exception as e:
             self.status_bar.config(text=f"Error loading schemas: {e}")
 
-    def parse_key(self, parent, key_id, name, data, schema, variant=False):
+    def parse_key(self, parent, key_id, name, data, schema, settings, variant=False):
         # variant type
         root_key = None
         nullable = False
@@ -356,13 +359,13 @@ class GSettingsViewer(tk.Tk):
                     current = self.insert(parent, name, unpacked, self.NodeType.KEY)
                 else:
                     current = self.insert(parent, name, unpacked, self.NodeType.VALUE)
-                gi_dict.add_gidata(current, key_id, schema, name, data, variant)
+                gi_dict.add_gidata(current, key_id, schema, settings, name, data, variant)
             else:
                 # Do not insert variant types into tree. Instead mark data as variant.
                 node_type = self.NodeType.COMPOUND if key_id else self.NodeType.KEY
                 if not is_variant or (is_variant and key_id == None):
                     current = self.insert(parent, name, tv, node_type)
-                    gi_dict.add_gidata(current, key_id, schema, name, data, variant)
+                    gi_dict.add_gidata(current, key_id, schema, settings, name, data, variant)
                 if is_variant and key_id != None:
                     current = parent 
                     
@@ -376,31 +379,38 @@ class GSettingsViewer(tk.Tk):
                         d = data.get_child_value(i)
                         k = d.get_child_value(0)
                         v = d.get_child_value(1)
-                        self.parse_key(current, root_key, k.unpack(), v, schema)
+                        self.parse_key(current, root_key, k.unpack(), v, schema, settings)
                     else:          
                         # list/array/tuple         
                         d = data.get_child_value(i)
-                        self.parse_key(current, root_key, str(i), d, schema)
+                        self.parse_key(current, root_key, str(i), d, schema, settings)
             elif is_variant:
                 for i in range(data.n_children()):
                     d = data.get_child_value(i)
-                    self.parse_key(current, root_key, name, d, schema, variant=True)
+                    self.parse_key(current, root_key, name, d, schema, settings, variant=True)
             elif tv[0] == "m":
                 nullable = True
                 for i in range(data.n_children()):
                     d = data.get_child_value(i)
-                    self.parse_key(current, root_key, str(i), d, schema)
+                    self.parse_key(current, root_key, str(i), d, schema, settings)
             else:
                 if not tv[0] in GlVariant.base_type_sig:
                     print(f"-->Debug: Unknown variant type {tv}")
         else:
             # If the value is not set, just insert the key
             current = self.insert(parent, name, "", self.NodeType.KEY)
-            gi_dict.add_gidata(current, key_id, schema, name, data, variant)
+            gi_dict.add_gidata(current, key_id, schema, settings, name, data, variant)
+        # Add decorations if there are special key properties present
+        self.maybe_decorate(current)
 
         return current
-     
+    
+   
     """ Event handlers"""
+    
+    # on_close handle
+    # Makes sure we destroy gsedit in case it was open when the main application
+    # was exiting.
     def on_close(self):
         if self.gsedit:
             self.gsedit.destroy()
@@ -467,11 +477,13 @@ class GSettingsViewer(tk.Tk):
         if isinstance(gi_data, GiSchema):
             # Can't edit schemas
             return
-        _,val = self.gi_dict.get_keyvalue(selected_item)
-        if not val.is_compound():
+        key,val = self.gi_dict.get_keyvalue(selected_item)
+        if not val.is_compound() and key.is_writable():
             self.do_edit()
 
+    # Do the editing.
     # Create GsEdit and put it in place of the tree pane
+    # When the editing is done, the tree view will be restored
     def do_edit(self):
         widgets =  [
             self.path_entry,
@@ -514,6 +526,8 @@ class GSettingsViewer(tk.Tk):
         self.gsedit = None
         
     ## Search handle
+    ## Handles keystrokes inside the search entry 
+    ## to handle search and navigation
     def search_handle(self, event):
         # If the key is a special key, handle it separately
         # For example, Up and Down keys for navigation
@@ -536,6 +550,7 @@ class GSettingsViewer(tk.Tk):
         self.after_id = self.after(self.SEARCH_DELAY, self.search)  # Perform search after delay
 
     ## Top level search function
+    ## Invokes recursive search along the treee
     def search(self):
         self.search_results.reset()  # Reset search results
         self.search_label.config(text=f"0 / 0")
@@ -657,6 +672,14 @@ class GSettingsViewer(tk.Tk):
         image = self.icons_dict.get(type, self.ico_empty)
         return self.tree.insert(parent, "end", text=key, values=values, image=image)
 
+    # Maybe decorate. It adds decorations to tree items based on key properties. 
+    # Right now we only decorate read-only keys, but this can change.
+    def maybe_decorate(self, current):
+        tree = self.tree
+        key, val = self.gi_dict.get_keyvalue(current)
+        if not key.is_writable():
+            tree.item(current, tags=("readonly",))
+            
     ## Update text pane
     ## This function updates the text pane with details of the selected item in the treeview.
     def update_text_pane(self, selected_item):
@@ -688,7 +711,10 @@ class GSettingsViewer(tk.Tk):
                 # If summary is present, show it 
                 if gi_key.get_summary():
                     self.text.insert(tk.END, f"\t({gi_key.get_summary()})\n")
-                self.text.insert(tk.END, "\n")
+            # If read-only
+            if not gi_key.is_writable():
+                self.text.insert(tk.END, "Read Only\n", "bold_red")
+            self.text.insert(tk.END, "\n")
             #if key type present, show it
             if gi_key.get_key_type():
                 self.text.insert(tk.END, "\nKey type: ", "bold_blue")
@@ -706,9 +732,8 @@ class GSettingsViewer(tk.Tk):
                 self.text.insert(tk.END, f"\n{gi_value.get_value()}\n") 
         if gi_key:
             # If default value if present
-            default_value = gi_key.get_default_value()
-            if default_value:
-                default_value =  get_defaultvalue(self.tree, default_value, gi_value)
+            default_value =  get_defaultvalue(self.tree, gi_key.get_default_value(), gi_value)
+            if default_value != None:
                 self.text.insert(tk.END, f"Default Value: ", "bold_blue")
                 self.text.insert(tk.END, f"\n{default_value}\n")
             # If range is present, show it

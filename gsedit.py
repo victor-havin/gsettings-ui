@@ -49,9 +49,9 @@ class GSettingsEditor(ttk.Frame):
         self.info_frame = ttk.Frame(self)
         self.label_info = tk.Label(self.info_frame, justify="left")
         self.label_info.configure(text=f"Schema: {self.gi_key.get_schema_name()}\nKey: {self.gi_key.get_key_name()}")
-        default_value = self.gi_key.get_default_value()
-        if default_value:
-            self.label_info.configure(text=self.label_info["text"] + f"\nDefault: {get_defaultvalue(self.root.tree, default_value, self.gi_value)}")
+        default_value = get_defaultvalue(self.root.tree, self.gi_key.get_default_value(), self.gi_value)
+        if default_value != None:
+            self.label_info.configure(text=self.label_info["text"] + f"\nDefault: {default_value}")
         self.label_info.pack(side=tk.LEFT, fill=tk.X)
         self.info_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         self.edit_frame = tk.Frame(self)
@@ -80,8 +80,8 @@ class GSettingsEditor(ttk.Frame):
         self.button_ok.pack(side=tk.RIGHT)
         self.button_cancel = tk.Button(self.ok_frame, text="Cancel", command=self.reject_change)
         self.button_cancel.pack(side=tk.RIGHT)
-        self.message_label = tk.Label(self)
-        self.message_label.pack(side=tk.BOTTOM, fill=tk.X)
+        self.message_label = tk.Label(self, justify="left")
+        self.message_label.pack(side=tk.LEFT, fill=tk.X)
 
     def key_handle(self, event):
         if isinstance(event.widget, ttk.Treeview):
@@ -186,13 +186,15 @@ class GSettingsEditor(ttk.Frame):
                     settings = Gio.Settings.new_with_path(schema_name, location)
                 else:
                     settings = Gio.Settings.new(schema_name)
-                settings.set_value(key_name, variant)
+                is_ok = settings.set_value(key_name, variant)
         except Exception as e:
             error_msg = f"{e}";
             self.message_label.configure(text=e)
             is_ok = False
         if is_ok:
             self.destroy()
+        else:
+            self.message_label.configure(text="Update failed")
         return "break"
             
     def reject_change(self, even=None):

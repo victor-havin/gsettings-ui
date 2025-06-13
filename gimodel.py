@@ -4,6 +4,7 @@ This is the data model for Gio interface as seen by the UI module.
 """
 import gi
 gi.require_version("Gio", "2.0")
+from gi.repository import Gio
 from gi.repository import GLib
 
 class GlVariant(GLib.Variant):
@@ -120,6 +121,7 @@ class GiKey:
         self.range = None               # Range of values for the schema key (if applicable)
         self.description = None         # Description of the schema key
         self.default_value = None       # Default value of the schema key
+        self.writable = True            # Default value for writeable
         self.value = None               # Current value of the schema key
     
     ## String representation methods
@@ -133,7 +135,7 @@ class GiKey:
         return False
     
     @classmethod
-    def factory(cls, schema, key_name, key_id):
+    def factory(cls, schema, settings, key_name, key_id):
         gi_key = GiKey(schema.get_id(), key_name, key_id)
         # Check if the value is set
         schema_key = schema.get_key(key_name)
@@ -155,6 +157,7 @@ class GiKey:
                 gi_key.range = value_range.unpack()
             if summary:
                 gi_key.summary = summary
+            gi_key.writable = settings.is_writable(key_name)
         return gi_key
         
     def get_schema_name(self):
@@ -186,6 +189,8 @@ class GiKey:
         return self.key_type
     def get_key_id(self):
         return self.key_id
+    def is_writable(self):
+        return self.writable
 
 class GiValue:
     """
@@ -235,6 +240,7 @@ class GiValue:
     
     def set_variant(self, is_variant):
         self.variant = is_variant
+        
 
 class GiDict(dict):
     """ 
@@ -283,7 +289,7 @@ class GiDict(dict):
             raise TypeError(f"No key or value at {id}")
         return (gi_key, gi_value)
     
-    def add_gidata(self, current, key_id, schema, name, data, variant):
+    def add_gidata(self, current, key_id, schema, settings, name, data, variant):
         # generate Keys and values
         tv = data.get_type_string() if data != None else '?'
         # Set the root key
@@ -296,7 +302,7 @@ class GiDict(dict):
             self[current] = value
             
         else:
-            gi_key = GiKey.factory(schema, name, current)
+            gi_key = GiKey.factory(schema, settings, name, current)
             self[current] = gi_key
             if data != None:
                 value = (GiValue.factory(gi_key, data.unpack(), tv))
@@ -307,13 +313,13 @@ class GiDict(dict):
 common helpers
 """
 def get_defaultvalue(tree, default_value, value):
-    if type(default_value) in [list, tuple]:
+    if default_value and  type(default_value) in [list, tuple]:
     # if default is compond and value is not - select the matchiing one
         if not value.is_compound():
             selected_item = tree.focus()
             parent = tree.parent(selected_item)
             index = tree.get_children(parent).index(selected_item)
-            selected_value = default_value[index]
+            selected_value = default_value[index] if index < len(default_value) else None
             return selected_value
     return default_value
                         
